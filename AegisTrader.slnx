@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AegisTrader.API/AegisTrader.API.csproj" />
+  <Project Path="AegisTrader.Core/AegisTrader.Core.csproj" />
+</Solution>
