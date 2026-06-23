@@ -12,6 +12,14 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
+// Health check endpoint
+app.MapGet("/", () => new { message = "AegisTrader API is running", timestamp = DateTime.UtcNow });
+
+app.MapControllers();
 
 app.Run();
