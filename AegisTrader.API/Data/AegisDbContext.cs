@@ -25,7 +25,7 @@ public class AegisDbContext : DbContext
             .SelectMany(t => t.GetProperties())
             .Where(p => p.ClrType == typeof(decimal)))
         {
-            property.SetColumnType("decimal(18,5)");
+            property.SetColumnType("decimal(18,6)");
         }
     }
 }

@@ -1,16 +1,29 @@
 using AegisTrader.API.Data;
+using AegisTrader.API.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 
+builder.Services.AddSwaggerGen(); 
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AegisDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-builder.Services.AddControllers();
+
+builder.Services.AddScoped<DataImportService>();
 
 var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "AegisTrader API V1");
+    c.RoutePrefix = "swagger"; // This makes it available at /swagger
+});
 
 if (!app.Environment.IsDevelopment())
 {
@@ -18,7 +31,9 @@ if (!app.Environment.IsDevelopment())
 }
 
 // Health check endpoint
-app.MapGet("/", () => new { message = "AegisTrader API is running", timestamp = DateTime.UtcNow });
+app.MapGet("/", () => "AegisTrader API is running");
+
+app.UseAuthorization();
 
 app.MapControllers();
 
