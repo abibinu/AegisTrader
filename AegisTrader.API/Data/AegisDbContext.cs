@@ -10,7 +10,8 @@ public class AegisDbContext : DbContext
     // Define the tables
     public DbSet<User> Users { get; set; }
     public DbSet<Candlestick> Candlesticks { get; set; }
-    // We will add TradingSession and Trade in the next sub-step
+    public DbSet<TradingSession> TradingSessions { get; set; }
+    public DbSet<Trade> Trades { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

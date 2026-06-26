@@ -13,8 +13,9 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AegisDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-
 builder.Services.AddScoped<DataImportService>();
+builder.Services.AddScoped<ReplayService>();
+builder.Services.AddScoped<TradeService>();
 
 var app = builder.Build();
 

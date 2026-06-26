@@ -3,6 +3,7 @@ using System;
 using AegisTrader.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AegisTrader.API.Migrations
 {
     [DbContext(typeof(AegisDbContext))]
-    partial class AegisDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260626023313_AddTradingSession")]
+    partial class AddTradingSession
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -58,50 +61,6 @@ namespace AegisTrader.API.Migrations
                     b.HasIndex("Symbol", "Timestamp");
 
                     b.ToTable("Candlesticks");
-                });
-
-            modelBuilder.Entity("AegisTrader.Core.Entities.Trade", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ClosedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Direction")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("EntryPrice")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<decimal?>("ExitPrice")
-                        .HasColumnType("numeric");
-
-                    b.Property<decimal>("LotSize")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<DateTime>("OpenedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal>("PnL")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<Guid>("SessionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("StopLoss")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<decimal>("TakeProfit")
-                        .HasColumnType("decimal(18,6)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Trades");
                 });
 
             modelBuilder.Entity("AegisTrader.Core.Entities.TradingSession", b =>
