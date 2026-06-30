@@ -11,37 +11,33 @@ namespace AegisTrader.API.Controllers;
 public class TradeController : ControllerBase
 {
     private readonly TradeService _tradeService;
+    private readonly AnalyticsService _analyticsService; 
     private readonly AegisDbContext _context;
 
-    public TradeController(TradeService tradeService, AegisDbContext context)
+    public TradeController(TradeService tradeService, AnalyticsService analyticsService, AegisDbContext context)
     {
         _tradeService = tradeService;
+        _analyticsService = analyticsService;
         _context = context;
     }
 
     [HttpPost("open")]
     public async Task<IActionResult> OpenTrade(Guid sessionId, TradeDirection direction, decimal sl, decimal tp, decimal lots = 1.0m)
     {
-        // 1. Get the session to find the current "Time Machine" price
         var session = await _context.TradingSessions.FindAsync(sessionId);
         if (session == null) return NotFound("Session not found");
 
-        // 2. Get the most recent candle to determine Entry Price
         var lastCandle = await _context.Candlesticks
             .Where(c => c.Symbol == session.Symbol && c.Timestamp <= session.CurrentReplayTimestamp)
             .OrderByDescending(c => c.Timestamp)
             .FirstOrDefaultAsync();
 
-        if (lastCandle == null) return BadRequest("No price data available for this session time.");
+        if (lastCandle == null) return BadRequest("No price data available.");
 
-        // We use the 'Close' of the current candle as our entry price
-        var entryPrice = lastCandle.Close;
-
-        // 3. Place the trade
         var trade = await _tradeService.PlaceTrade(
             sessionId, 
             direction, 
-            entryPrice, 
+            lastCandle.Close, 
             sl, 
             tp, 
             lots, 
@@ -60,5 +56,12 @@ public class TradeController : ControllerBase
             .ToListAsync();
             
         return Ok(trades);
+    }
+
+    [HttpGet("analytics/{sessionId}")]
+    public async Task<IActionResult> GetAnalytics(Guid sessionId)
+    {
+        var summary = await _analyticsService.GetSessionSummary(sessionId);
+        return Ok(summary);
     }
 }

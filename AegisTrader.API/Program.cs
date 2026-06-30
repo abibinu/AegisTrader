@@ -14,6 +14,7 @@ builder.Services.AddDbContext<AegisDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<DataImportService>();
+builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ReplayService>();
 builder.Services.AddScoped<TradeService>();
 
