@@ -1,65 +1,236 @@
 # AegisTrader
 
-## 1. Project Overview
-AegisTrader is a specialized trading simulation platform engineered specifically for modern volume and structural trading frameworks, such as Inner Circle Trader (ICT) and Smart Money Concepts (SMC). The primary engineering objective is to provide a deterministic historical replay engine and a real-time paper trading interface, allowing students to backtest strategies without capital exposure.
+> A deterministic Forex backtesting and paper trading simulation platform engineered for ICT / SMC trading frameworks.
 
-### Project Goals
-* Demonstrate rigorous full-stack enterprise development patterns.
-* Provide a zero-risk sandbox environment simulating order execution mechanics.
-* Facilitate quantitative practice of ICT/SMC rulesets (e.g., liquidity sweeps, fair value gaps).
-* Generate professional-grade quantitative trading performance metrics and analytics.
-
-## 2. Technology Stack
-The platform utilizes a decoupled, modern web architecture optimized for high-performance data processing.
-
-* **Backend Framework:** ASP.NET Core Web API (.NET 10 LTS)
-* **Frontend Architecture:** React (Functional Components, Hooks API) with React Router
-* **Database Engine:** PostgreSQL (ACID compliant, transaction-safe historical storage)
-* **ORM:** Entity Framework Core (Code-First migration strategy)
-* **Authentication:** JWT Bearer Authentication (Cryptographically signed symmetric tokens)
-* **Data Visualization:** TradingView Financial Lightweight Charts
-* **Live Market Routing:** CurrencyFreaks API & ExchangeRate.host
-
-## 3. System Architecture
-The system utilizes a clean, decoupled Controller-Service-Repository architecture pattern. Requests stream linearly from the client to endpoints, which abstract core execution rules into dedicated service boundaries before persistence layers interact with the database engine.
-
-### Execution Flow
-1. **Client Layer:** React Frontend View dispatches HTTP JSON Requests with JWT Bearer Headers.
-2. **Routing Layer:** ASP.NET Core API Routing / Controllers handle incoming traffic.
-3. **Business Logic Layer:** Application Services manage the Replay Engine and Trade Evaluation.
-4. **Data Access Layer:** Entity Framework Core DbContext translates logic.
-5. **Storage Layer:** PostgreSQL Database Engine persists the data.
-
-## 4. Core Execution Engine Specifications
-
-### The Historical Replay Clock
-To avoid look-ahead bias during historical backtesting simulations, the application implements a strict timestamp visibility barrier. When a historical replay session initializes, a CurrentReplayTimestamp pointer is set at the historical start date. The server restricts chart delivery by enforcing that candlestick timestamps must be less than or equal to the current replay timestamp.
-
-### The Overlap Constraint (Defensive Liquidation)
-AegisTrader implements highly conservative liquidation criteria to guarantee realistic performance reporting against adverse real-world slippage.
-
-If a single historical candle features a range that violates both the Take Profit (TP) and Stop Loss (SL) boundaries simultaneously:
-* **Buy Orders:** The execution engine defaults to a pessimistic assumption, processing the order strictly as a Stop Loss closure.
-* **Sell Orders:** The system immediately processes the order as a Stop Loss closure.
-
-### Financial Precision Realignment
-AegisTrader bypasses standard percentage-based cryptocurrency calculations. The financial mathematics are built entirely around raw Pip calculations optimized for Forex pairs (EURUSD, XAUUSD). Pricing relies on fractional precision down to five decimal places (0.00001) for currencies and two decimal places (0.01) for commodities.
-
-## 5. Database Schema
-The physical data layer enforces structural integrity via foreign keys and strict relational constraints.
-
-* **Users:** Id (UUID), Username, Email, PasswordHash, CreatedAt
-* **TradingSessions:** Id (UUID), UserId (FK), Session Type (Replay/Forward), Account Balance, BaseCurrency, CurrentReplayTimestamp
-* **Candlesticks:** Id (BigInt), Symbol, Timestamp, Open, High, Low, Close, Volume
-* **Trades:** Id (UUID), SessionId (FK), Direction (Buy/Sell), EntryPrice, StopLoss, TakeProfit, LotSize, PnL, Status (Open/Closed)
-
-## 6. Developer Initialization
-*(To be populated post-scaffolding)*
-
-1. Database Connection Strings
-2. Entity Framework Update Commands
-3. .NET CLI Build Instructions
-4. Node Package Manager Installation
+**Lead Engineer:** Abi Binu · MCA Batch 2025–27, Roll No. 2
 
 ---
-**Lead Engineer:** Abi Binu
+
+## 1. Project Overview
+
+AegisTrader is a specialized, enterprise-grade trading simulation platform built for modern volume and structural trading frameworks — specifically Inner Circle Trader (ICT) and Smart Money Concepts (SMC). It provides a **deterministic historical replay engine** and a **real-time paper trading interface**, allowing traders to rigorously backtest strategies in a zero-risk sandbox environment.
+
+### Project Goals
+- Demonstrate rigorous full-stack enterprise development patterns (Controller → Service → Repository)
+- Provide a zero-risk sandbox replicating real-world order execution mechanics
+- Facilitate quantitative practice of ICT/SMC rulesets (liquidity sweeps, fair value gaps, order blocks)
+- Generate professional-grade performance metrics: Win Rate, Profit Factor, and Max Drawdown
+
+---
+
+## 2. Technology Stack
+
+| Domain | Technologies |
+|--------|-------------|
+| **Frontend** | React 19 (Hooks API), React Router v7, Axios, TradingView Lightweight Charts v5 |
+| **Backend** | ASP.NET Core Web API (.NET 10 LTS) |
+| **Database & ORM** | PostgreSQL, Entity Framework Core (Code-First migrations) |
+| **Authentication** | JWT Bearer Authentication *(planned — placeholder `Guid.Empty` in dev)* |
+| **Historical Data** | Dukascopy 1-minute OHLCV CSV → PostgreSQL bulk import |
+| **Live Data Feed** | MetaTrader 5 (MT5) Python bridge — Vantage Markets Demo Account *(Phase 2)* |
+
+### Live Data Architecture (MT5 Bridge — Phase 2)
+
+Instead of a third-party REST API, AegisTrader's live price feed will be powered by a **local MT5 Python bridge** connecting to a **Vantage Markets demo account**:
+
+```
+[ Vantage MT5 Demo Account ]
+         │  (MetaTrader 5 Terminal — local)
+         ▼
+[ Python Bridge Script ]   ← uses MetaTrader5 Python library
+         │  POST /api/LivePrice/tick  (JSON tick data)
+         ▼
+[ ASP.NET Core LivePriceController ]
+         │
+         ▼
+[ React Frontend — Live Forward Test Sandbox ]
+```
+
+This approach gives us:
+- **Real institutional-grade price feeds** from Vantage (ECN pricing, 5-decimal Forex)
+- **Zero API cost** — MT5 terminal is free, Vantage demo accounts are free
+- **Full control** over tick rate and symbol selection (EURUSD, XAUUSD, etc.)
+- Clean separation: historical replay uses PostgreSQL, live mode uses the MT5 bridge
+
+The stub `LivePriceController` will be scaffolded in Phase 2 so the Python bridge only needs to `POST` tick data to a known endpoint.
+
+---
+
+## 3. System Architecture
+
+```
+[ React Frontend ]
+      │  HTTP JSON + JWT Bearer Header
+      ▼
+[ ASP.NET Core Controllers ]
+      │
+      ▼
+[ Business Logic Services ]
+  ├── ReplayService    — Timestamp visibility barrier, step-forward logic
+  ├── TradeService     — Overlap Constraint, pip P&L calculation
+  └── AnalyticsService — Win Rate, Profit Factor, Max Drawdown
+      │
+      ▼
+[ EF Core DbContext → PostgreSQL ]
+```
+
+---
+
+## 4. Core Engine Specifications
+
+### 4.1 The Historical Replay Clock
+
+To eliminate look-ahead bias, the engine enforces a strict **timestamp visibility barrier**:
+
+```sql
+SELECT * FROM Candlesticks
+WHERE Symbol = @Symbol AND Timestamp <= @CurrentReplayTimestamp
+ORDER BY Timestamp ASC;
+```
+
+Every "Step Forward" interaction increments `CurrentReplayTimestamp` by the selected interval (1m / 5m / 15m / 1H / 4H) and returns only the newly visible data — the chart can never see the future.
+
+### 4.2 The Overlap Constraint (Defensive Liquidation)
+
+When a single candle's range violates **both** TP and SL simultaneously (e.g., a sharp spike), AegisTrader pessimistically defaults to a **Stop Loss closure** to reflect real-world adverse slippage:
+
+| Scenario | Buy Order | Sell Order |
+|----------|-----------|------------|
+| TP hit only | Win — close at TP | Win — close at TP |
+| SL hit only | Loss — close at SL | Loss — close at SL |
+| Both hit (Overlap) | **Forced SL closure** | **Forced SL closure** |
+
+### 4.3 Forex Financial Precision
+
+All P&L is calculated using raw pip math — no percentage-based models:
+
+```
+Pips (Buy)  = (ExitPrice - EntryPrice) × 10,000
+Pips (Sell) = (EntryPrice - ExitPrice) × 10,000
+P&L = Pips × LotSize × PipValue ($10 per pip for standard lot on EURUSD)
+```
+
+### 4.4 Analytics Engine
+
+Metrics computed via LINQ over the closed trades ledger:
+
+| Metric | Formula |
+|--------|---------|
+| **Win Rate** | (Winning Trades / Total Trades) × 100 |
+| **Profit Factor** | Gross Profit / Gross Loss |
+| **Max Drawdown** | Peak-to-trough equity curve: tracks the worst capital decline from any high-water mark |
+
+---
+
+## 5. Database Schema
+
+```
+Users
+  └── Id (UUID PK), Username, Email, PasswordHash, CreatedAt
+
+TradingSessions
+  └── Id (UUID PK), UserId (FK → Users), Symbol, Type (Replay/LivePaper),
+      InitialBalance, CurrentBalance, CurrentReplayTimestamp, CreatedAt
+
+Candlesticks
+  └── Id (BigInt PK), Symbol, Timestamp, Open, High, Low, Close, Volume
+  └── INDEX on (Symbol, Timestamp) — optimized for replay queries
+
+Trades
+  └── Id (UUID PK), SessionId (FK → TradingSessions), Direction (Buy/Sell),
+      Status (Open/Closed), EntryPrice, StopLoss, TakeProfit, LotSize,
+      ExitPrice, PnL, OpenedAt, ClosedAt
+```
+
+---
+
+## 6. Current Build Status
+
+| Module | Status |
+|--------|--------|
+| PostgreSQL schema & EF Core migrations | ✅ Complete |
+| Dukascopy CSV data seeder | ✅ Complete — 1M rows (EURUSD, May 2026) |
+| Historical Replay Engine (ReplayService) | ✅ Complete |
+| Overlap Constraint (TradeService) | ✅ Complete |
+| Analytics Engine (MaxDrawdown) | ✅ Complete |
+| Swagger / OpenAPI | ✅ Active at `/swagger` |
+| React Replay UI (Chart + Trade Panel) | ✅ Complete |
+| Step-Forward Controls (+1m/+5m/+15m/+1H/+4H) | ✅ Complete |
+| Trade History Panel | ✅ Complete |
+| Analytics Dashboard Page | ✅ Complete |
+| React Router (`/replay`, `/analytics/:id`) | ✅ Complete |
+| JWT Authentication | 🔲 Planned (Phase 2) |
+| MT5 Python Live Price Bridge | 🔲 Planned (Phase 2) |
+| Candle Timeframe Aggregation (5m/15m/1H) | 🔲 Planned |
+| Session Balance Auto-Update on Trade Close | 🔲 Planned |
+
+---
+
+## 7. Developer Setup
+
+### Prerequisites
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- [Node.js 20+](https://nodejs.org)
+- [PostgreSQL 16](https://www.postgresql.org/download/)
+- MetaTrader 5 Terminal *(Phase 2 only)*
+
+### Backend (ASP.NET Core API)
+
+```bash
+# 1. Configure your PostgreSQL connection string in:
+#    AegisTrader.API/appsettings.json → ConnectionStrings → DefaultConnection
+
+# 2. Apply database migrations
+cd AegisTrader.API
+dotnet ef database update
+
+# 3. Run the API server (port 5273)
+dotnet run
+# Swagger UI available at: http://localhost:5273/swagger
+```
+
+### Seed Historical Data
+
+The seeder expects a **Dukascopy-format semicolon-delimited CSV**:
+```
+20260501 000100;1.12345;1.12360;1.12330;1.12350;100
+```
+
+Trigger the import via the API:
+```
+POST http://localhost:5273/api/Seed/import-eurusd?filePath=C:\path\to\EURUSD_1m.csv
+```
+
+Verify the seed completed:
+```
+GET http://localhost:5273/api/Seed/status?symbol=EURUSD
+→ { "symbol": "EURUSD", "count": 1000000, "earliestCandle": "...", "latestCandle": "..." }
+```
+
+### Frontend (React + Vite)
+
+```bash
+cd AegisTrader.Frontend
+npm install
+npm run dev
+# App available at: http://localhost:5173
+```
+
+---
+
+## 8. API Endpoint Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/Seed/status?symbol=EURUSD` | Check candle count & date range |
+| `POST` | `/api/Seed/import-eurusd?filePath=...` | Bulk import CSV |
+| `POST` | `/api/Replay/start?symbol=EURUSD&startTime=...` | Create a new replay session |
+| `GET` | `/api/Replay/{sessionId}/candles` | Get visible candles (last 200) |
+| `POST` | `/api/Replay/{sessionId}/step?minutes=15` | Advance the replay clock |
+| `POST` | `/api/Trade/open?sessionId=...&direction=Buy&sl=...&tp=...&lots=...` | Place a trade |
+| `GET` | `/api/Trade/history/{sessionId}` | Get all trades for a session |
+| `GET` | `/api/Trade/analytics/{sessionId}` | Get Win Rate, PF, Drawdown |
+
+---
+
+*AegisTrader — Enterprise Forex Backtesting Platform*
