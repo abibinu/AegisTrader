@@ -1,0 +1,143 @@
+﻿AegisTrader - Software Design Document (SDD)
+Technology Stack: ASP.NET Core Web API (.NET 10) + React + PostgreSQL
+Cost Profile: Free / Open Source
+
+
+1. Introduction
+AegisTrader is an specialized trading simulation platform engineered specifically for modern volume and structural trading frameworks, such as Inner Circle Trader (ICT) and Smart Money Concepts (SMC). The primary engineering objective is to provide a deterministic historical replay engine and a real-time paper trading interface, allowing students to backtest strategies without capital exposure.
+Project Goals:
+* Demonstrate rigorous full-stack enterprise development patterns.
+* Provide a zero-risk sandbox environment simulating order execution mechanics.
+* Facilitate quantitative practice of ICT/SMC rulesets (e.g., liquidity sweeps, fair value gaps).
+* Generate professional-grade quantitative trading performance metrics and analytics.
+Project Constraints:
+* Strict 3-month development lifecycle for a single engineer.
+* Exclusive reliance on zero-cost, open-source external dependencies and APIs.
+* Local/on-premise database and application execution hosting to avoid infrastructure bills.
+
+
+2. System Scope & Boundaries
+In-Scope Functional Domains
+	Out-of-Scope System Boundaries
+ 
+	Secure User Authentication & Session Persistence
+	Live Broker Integration & Real Capital Routing
+	Historical Candle Replay Engine (Sequential stepping)
+	Automated AI Signal Generation / Algorithmic Execution
+	Forex Manual Trade Placement (Market / Limit / Stop)
+	Machine Learning Predictive Price Models
+	Defensive Multi-Boundary TP/SL Processing
+	Multi-Asset Portfolio Complex Cross-Collateralization
+	Live Price Forward Testing UI Sandbox
+	High-Frequency Trading (HFT) Infrastructure
+	Performance Analytics & Comprehensive Drawdown Tracking
+	Social Copy-Trading / Public Leaderboards
+	
+
+3. Technology Stack Specification
+Frontend Architecture:
+* Core Library: React (Functional Components, Hooks API)
+* Routing: React Router (Client-side decoupled view management)
+* HTTP Client: Axios (Configured with custom interceptors for automatic Bearer token assignment)
+* Data Visualization: TradingView Financial Lightweight Charts (High-performance canvas rendering)
+Backend Infrastructure:
+* Framework: ASP.NET Core Web API (.NET 10 LTS)
+* ORM: Entity Framework Core (Code-First migration strategy)
+* Security: JWT Bearer Authentication (Cryptographically signed symmetric tokens)
+Database & Third-Party APIs:
+* Relational Storage: PostgreSQL (ACID compliant, transaction-safe historical storage)
+* Live Forex Data Routing: CurrencyFreaks API & ExchangeRate.host (JSON-over-HTTP rest endpoints mapping real-time spot prices)
+
+
+4. Architectural Design & Topology
+The system utilizes a clean, decoupled Controller-Service-Repository architecture pattern. Requests stream linearly from the client to endpoints, which abstract core execution rules into dedicated service boundaries before persistence layers interact with the database engine.
+[ React Frontend View ]
+│ (HTTP JSON Requests + JWT Bearer Header)
+▼
+[ ASP.NET Core API Routing / Controllers ]
+│
+▼
+[ Business Logic Layer / Application Services ] (Replay Engine / Trade Evaluation)
+│
+▼
+[ Data Access Layer / Entity Framework Core DbContext ]
+│
+▼
+[ PostgreSQL Database Engine ]
+
+
+
+5. Database Schema & Relational Design
+The database physical layer enforces structural integrity via foreign keys and strict relational constraints to track user state and backtesting performance historical baselines.
+Table Name
+	Primary / Foreign Keys
+	Key Structural Fields
+ 
+	Users
+	PK: Id (UUID)
+	Username, Email, PasswordHash, CreatedAt
+	TradingSessions
+	PK: Id (UUID), FK: UserId
+	Session Type (Replay/Forward), Account Balance, BaseCurrency, CurrentReplay Timestamp
+	Candlesticks
+	PK: Id (BigInt)
+	Symbol (e.g., EURUSD), Timestamp, Open, High, Low, Close, Volume
+	Trades
+	PK: Id (UUID), FK: SessionId
+	Direction (Buy/Sell), EntryPrice, StopLoss, TakeProfit, LotSize, PnL, Status (Open/Closed)
+	
+
+6. Core Engine Execution Specs
+The Historical Replay Clock
+To avoid look-ahead bias during historical backtesting simulations, the application implements a strict timestamp visibility barrier. When a historical replay session initializes, a CurrentReplay Timestamp pointer is set at the historical start date. The server restricts chart delivery using a basic boundary rule:
+SELECT * FROM Candlesticks WHERE Symbol = @Symbol AND Timestamp <= @CurrentReplay Timestamp ORDER BY Timestamp ASC;
+Every "Next Candle" interaction triggers a request to step forward, causing the server to advance the CurrentReplay Timestamp incrementally based on the chart interval selection (e.g., +15 Minutes, +1 Hour).
+The Overlap Constraint Implementation (Defensive Execution Engine)
+A frequent failure state in trade engines occurs when a sharp market spike or a gap features a single candle whose range violates both the Stop Loss (SL) and Take Profit (TP) boundaries simultaneously. Aegis Trader implements a highly conservative liquidation criteria to guarantee realistic performance reporting:
+* Buy Order Conditions:
+   * Standard Target Hit: High >= TakeProfit → Trade liquidated as a Win.
+   * Standard Stop Hit: Low <= StopLoss → Trade liquidated as a Loss.
+   * Overlap Constraint: If a single historical candle fulfills (High >= TakeProfit) AND (Low <= StopLoss) simultaneously, the execution engine defaults to a defensive pessimistic assumption, processing the order strictly as a Stop Loss closure to reflect adverse real-world slippage.
+* Sell Order Conditions:
+   * Standard Target Hit: Low <= TakeProfit → Trade liquidated as a Win.
+   * Standard Stop Hit: High >= StopLoss → Trade liquidated as a Loss.
+   * Overlap Constraint: If a single historical candle fulfills (Low <= TakeProfit) AND (High >= StopLoss) simultaneously, the system immediately processes the order as a Stop Loss closure.
+
+
+7. Financial Precision Realignment (Forex Architecture)
+Unlike generic platforms built for assets with low fractional sensitivity, Aegis Trader features precise data routing pathways optimized entirely for Forex pairs such as EURUSD and XAUUSD. Real-world Forex analysis relies on fractional pricing down to five decimal places (0.00001) for standard currency components and two decimal places (0.01) for gold commodities.
+[ CurrencyFreaks / ExchangeRate.host API ]
+│ (HTTPS Rest Feed Raw JSON Exchange Quotes)
+▼
+[ Live Price Routing Module ]
+│ (Map Decimal Scaling & Payout Mechanics)
+▼
+[ Open Sandbox / Trades Ledger ]
+
+The platform eliminates cryptocurrency structures from its core domain and builds its financial mathematics around Pip calculations. Account balances are adjusted using standard Forex lot-sizing formulas where profits are dependent on the change in raw points rather than percentage swings common in digital token products.
+
+
+8. Comprehensive Analytics Module
+The system analytics dashboard utilizes efficient LINQ database queries executed directly in the ASP.NET Core layer to process trading statistics at the end of each session:
+* Win Rate: (Winning Trades / Total Trades) * 100
+* Profit Factor: Gross Profits / ABS(Gross Losses)
+* Maximum Drawdown (Max DD): Continuous peak-to-trough equity curve calculation to evaluate capital preservation efficiency during long drawdowns.
+
+
+9. Decoupled Development & Postman Verification Roadmap
+Month 1: Infrastructure and Foundation
+* Week 1: Solution environment scaffolding, dependency injection mapping, Git repository control strategy setup.
+* Week 2: PostgreSQL relational schema creation, configuration of EF Core Code-First DbContext models.
+* Week 3: Implementation of BCrypt password hashing utilities and identity validation middleware layers.
+* Week 4: Completion of Session Management state handling and multi-session separation logic.
+Month 2: Core Processing, Execution, and Sandbox Verification
+* Week 5: Development of the historical candle timeline management system and Replay Engine pointer logic.
+* Week 6: Engineering the Trade Execution logic incorporating the defensive multi-boundary Overlap Constraint rules.
+* Week 7: Production of the historical trade ledger endpoints and quantitative LINQ performance aggregation queries.
+* Week 8: Postman Backend Verification Phase (Mandatory Sandbox Testing)
+Before introducing any React UI complexity, the engineer must execute comprehensive, isolated end-to-end sandbox routing tests. This testing block requires setting up independent, decoupled Postman environments (Development vs Mock Local) to simulate complete user lifecycles. Target scenarios include: testing consecutive session steps, handling complex multi-order scenarios, forcing simultaneous TP/SL candle triggers to verify pessimistic liquidation logic, and confirming precise data transformations of raw Forex decimal numbers. Frontend construction is strictly blocked until all API routes successfully pass these verification test scripts.
+Month 3: UI Implementation, Integration, and Sign-off
+   * Week 9: Implementing React client pages, installing lightweight charting visual elements.
+   * Week 10: Constructing Axios client connections, configuring request interceptors for global authentication state maintenance.
+   * Week 11: System manual end-to-end integration workflows verification and end-user smoke testing cycles.
+   * Week 12: Compiling final document metrics, exporting technical specifications, and submitting the codebase.

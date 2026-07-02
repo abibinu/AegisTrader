@@ -1,0 +1,34 @@
+﻿AegisTrader : Trading Simulation and Backtesting Platform 
+Abi Binu 
+Roll no : 2
+MCA A batch 2025-27
+
+
+1. Project Overview
+________________
+AegisTrader is a specialized, enterprise-grade trading simulation platform engineered specifically for modern volume and structural trading frameworks, such as Inner Circle Trader (ICT) and Smart Money Concepts (SMC). The primary objective of this project is to provide a deterministic historical replay engine and a real-time paper trading interface. This allows users to rigorously backtest strategies and practice market execution mechanics within a zero-risk sandbox environment, entirely eliminating capital exposure.
+2. Core Objectives
+________________
+* Risk-Free Strategy Validation: Deliver a deterministic sandbox for quantitative practice of specific trading rulesets (e.g., liquidity sweeps, fair value gaps).
+* Realistic Execution Simulation: Replicate adverse real-world slippage and precise fractional pricing to ensure backtesting results are authentic and untampered by look-ahead bias.
+* Enterprise Architecture Demonstration: Implement rigorous, full-stack decoupled development patterns using modern open-source technologies.
+3. Key System Features
+________________
+* Historical Candle Replay Engine: A sequential timeline stepping system that restricts chart delivery using a strict timestamp visibility barrier, guaranteeing zero look-ahead bias during historical simulations.
+* Defensive Execution Engine (Overlap Constraint): A highly conservative liquidation algorithm. If a single market spike violates both the Take Profit (TP) and Stop Loss (SL) boundaries simultaneously, the engine pessimistically defaults to a Stop Loss closure.
+* Forex-Optimized Financial Precision: Bypasses generic percentage-based models in favor of precise fractional pricing (down to five decimal places) and raw Pip calculations optimized for Forex pairs (e.g., EURUSD, XAUUSD).
+* Comprehensive Performance Analytics: Real-time generation of professional-grade quantitative metrics, including Win Rate, Profit Factor, and Continuous Maximum Drawdown tracking.
+4. Technology Stack & Architecture
+________________
+The system utilizes a clean, decoupled Controller-Service-Repository architecture pattern, entirely reliant on zero-cost, open-source dependencies designed for local execution.
+Domain
+	Technologies Used
+ 
+	Frontend
+	React (Hooks API), React Router, Axios, TradingView Lightweight Charts
+	Backend
+	ASP.NET Core Web API (.NET 10 LTS), JWT Bearer Authentication
+	Database & ORM
+	PostgreSQL, Entity Framework Core (Code-First Migration)
+	Live Data Integration
+	CurrencyFreaks API, ExchangeRate.host (JSON-over-HTTP)

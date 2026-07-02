@@ -17,14 +17,18 @@ builder.Services.AddScoped<DataImportService>();
 builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ReplayService>();
 builder.Services.AddScoped<TradeService>();
+builder.Services.AddCors(options => {
+    options.AddPolicy("AllowAll", p => p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+});
 
 var app = builder.Build();
 
+app.UseCors("AllowAll");
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "AegisTrader API V1");
-    c.RoutePrefix = "swagger"; // This makes it available at /swagger
+    c.RoutePrefix = "swagger"; 
 });
 
 if (!app.Environment.IsDevelopment())

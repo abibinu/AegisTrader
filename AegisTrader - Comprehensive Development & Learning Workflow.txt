@@ -1,0 +1,82 @@
+﻿AegisTrader: Comprehensive Development & Learning Workflow
+A step-by-step masterclass guide for building an enterprise-grade Forex backtesting engine.
+
+
+Introduction: The Engineering Mindset
+This document serves as your definitive roadmap. It transitions the high-level concepts from the Software Design Document (SDD) into actionable, educational steps. As you progress through these phases, the focus is not just on writing syntax, but on understanding the underlying architectural principles—such as Dependency Injection, Code-First ORM migrations, and decoupled state management.
+This workflow integrates the crucial Data Ingestion Pivot, utilizing static CSV data for the historical replay engine to ensure precise intraday (1-minute/5-minute) structural analysis.
+
+
+Phase 1: Foundation & Infrastructure (Month 1, Weeks 1-2)
+Step 1: Solution Scaffolding (.NET 10)
+We begin by generating the skeletal structure of the backend. ASP.NET Core relies heavily on Dependency Injection (DI), which means components (like your database connection or execution services) are registered centrally and "injected" wherever needed.
+1. Initialize the project using the .NET CLI: dotnet new webapi -n AegisTrader.API
+2. Set up the Git repository and standard .gitignore to prevent pushing compiled binaries.
+3. Learning Objective: Understand the Program.cs file. This is the entry point of your application where the HTTP request pipeline and middleware (like CORS and Authentication) are configured.
+Step 2: Relational Database Configuration (PostgreSQL & EF Core)
+Instead of writing raw SQL strings, we use Entity Framework (EF) Core. This allows you to define your database schema using standard C# classes (Models).
+1. Install the required NuGet packages: Npgsql.EntityFrameworkCore.PostgreSQL and Microsoft.EntityFrameworkCore.Tools.
+2. Create the C# Models mapped to your SDD: User, TradingSession, Candlestick, and Trade.
+3. Define relationships (Foreign Keys) inside a class inheriting from DbContext.
+4. Run the Code-First Migrations: dotnet ef migrations add InitialCreate followed by dotnet ef database update.
+5. Learning Objective: Grasp how EF Core translates Object-Oriented C# structures into ACID-compliant PostgreSQL tables and enforces strict relational integrity.
+
+
+Phase 2: The Data Ingestion Pivot (Month 1, Week 3)
+Step 3: Seeding Historical Intraday Data
+To accurately backtest SMC/ICT concepts like Fair Value Gaps, the engine requires high-resolution intraday data. Live APIs fail here, so we will ingest historical CSV exports from Dukascopy or HistData.
+1. Acquire a 1-minute OHLC (Open, High, Low, Close) CSV file for EURUSD.
+2. Develop a one-time C# Data Seeder service (or a lightweight Python Pandas script) to parse the CSV.
+3. Map the parsed data into the EF Core Candlestick model and execute a Bulk Insert into PostgreSQL.
+4. Learning Objective: Learn efficient file I/O operations and database transaction batching to handle millions of rows without causing memory overflow exceptions.
+
+
+Phase 3: Core Execution Engine (Month 2, Weeks 4-6)
+Step 4: The Historical Replay Clock
+This is the heart of the deterministic sandbox. The system must never reveal future price action to the frontend.
+1. Create a ReplayService class responsible for fetching candlesticks.
+2. Implement the temporal barrier query. Using LINQ, this translates to:
+
+  var candles = await _context.Candlesticks
+     .Where(c => c.Symbol == requestSymbol && c.Timestamp <= session.CurrentReplayTimestamp)
+     .OrderBy(c => c.Timestamp)
+     .ToListAsync();
+ 
+3. Build an endpoint to increment the CurrentReplayTimestamp (e.g., +15 minutes) and return the newly visible data.
+4. Learning Objective: Master state persistence across HTTP requests. Since APIs are stateless, the current timestamp must be safely stored and updated within the TradingSession database row.
+Step 5: The Overlap Constraint (Trade Execution Logic)
+This defensive mechanism handles the pessimistic liquidation logic described in the SDD.
+Scenario
+	Execution Engine Logic
+ 
+	Standard Hit (TP or SL)
+	Liquidate and calculate accurate pip fractional value.
+	Simultaneous Violation
+	Force Stop Loss closure to mirror real-world adverse slippage.
+	Learning Objective: Write testable business logic. The trade evaluation engine should be a pure function that takes a Trade object and a Candlestick object, returning the outcome without directly touching the database. This makes unit testing incredibly easy.
+
+
+Phase 4: API Verification (Month 2, Weeks 7-8)
+Step 6: Postman Sandbox Testing
+Strict adherence to the SDD requires backend verification before any frontend work begins.
+   1. Set up a Postman Environment with Bearer Token authorization variables.
+   2. Simulate a full user lifecycle: Authenticate -> Create Replay Session -> Fetch Initial Chart -> Place Buy Order -> Step Timeline Forward -> Verify Overlap Constraint triggers correctly.
+   3. Learning Objective: Isolate frontend bugs from backend bugs. By confirming the JSON responses are mathematically perfect in Postman, any future charting glitches are isolated strictly to React.
+
+
+Phase 5: Frontend Integration (Month 3)
+Step 7: React & Axios Foundation
+Construct the user interface utilizing functional components and modern React hooks.
+   1. Initialize the React environment. Set up React Router for navigation between the Dashboard, Replay Engine, and Live Forward Test sandbox.
+   2. Configure an Axios instance with request interceptors to automatically attach the JWT Bearer token to every outgoing request.
+   3. Learning Objective: Manage global authentication state and handle asynchronous data fetching cleanly using useEffect hooks.
+Step 8: TradingView Lightweight Charts Integration
+This is where the application becomes a visual trading platform.
+   1. Install the lightweight-charts library.
+   2. Create a robust chart component that maps the incoming JSON array of candlesticks from your .NET API to the specific time/open/high/low/close format required by TradingView.
+   3. Implement UI controls that call the "Step Forward" API endpoint and dynamically append the new candle to the chart instance.
+   4. Learning Objective: Handle complex DOM manipulations and canvas rendering within the React lifecycle without causing memory leaks or infinite re-renders.
+
+
+Conclusion
+By following this workflow, the resulting AegisTrader platform will not only serve as a highly functional, enterprise-grade backtesting environment, but it will also stand as a comprehensive portfolio piece demonstrating deep architectural understanding of full-stack .NET and React development.
