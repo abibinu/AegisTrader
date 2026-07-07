@@ -2,7 +2,7 @@
 
 > A deterministic Forex backtesting and paper trading simulation platform engineered for ICT / SMC trading frameworks.
 
-**Lead Engineer:** Abi Binu · MCA Batch 2025–27, Roll No. 2
+**Lead Engineer:** Abi Binu · MCA Batch 2025–27
 
 ---
 
