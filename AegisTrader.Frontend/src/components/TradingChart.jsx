@@ -1,22 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { createChart, CandlestickSeries, ColorType } from 'lightweight-charts';
 
-/**
- * TradingChart — Lightweight Charts v5 API
- *
- * LEARNING NOTE:
- * In v5, series are no longer created with chart.addCandlestickSeries().
- * Instead you import the series TYPE and pass it to chart.addSeries().
- *   v4: chart.addCandlestickSeries({ ...options })
- *   v5: chart.addSeries(CandlestickSeries, { ...options })
- *
- * This decoupling lets lightweight-charts support custom series
- * from third parties in the same way — a much cleaner architecture.
- *
- * Props:
- *  - data: array of candle objects from the backend
- *  - trades: array of closed/open trade markers (optional)
- */
 const TradingChart = ({ data, trades = [] }) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
