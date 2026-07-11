@@ -25,7 +25,7 @@ AegisTrader is a specialized, enterprise-grade trading simulation platform built
 | **Frontend** | React 19 (Hooks API), React Router v7, Axios, TradingView Lightweight Charts v5 |
 | **Backend** | ASP.NET Core Web API (.NET 10 LTS) |
 | **Database & ORM** | PostgreSQL, Entity Framework Core (Code-First migrations) |
-| **Authentication** | JWT Bearer Authentication *(planned — placeholder `Guid.Empty` in dev)* |
+| **Authentication** | JWT Bearer Security (BCrypt hashing, Register/Login flows, protected routes, AuthContext, Axios interceptors) |
 | **Historical Data** | Dukascopy 1-minute OHLCV CSV → PostgreSQL bulk import |
 | **Live Data Feed** | MetaTrader 5 (MT5) Python bridge — Vantage Markets Demo Account *(Phase 2)* |
 
@@ -80,12 +80,12 @@ The stub `LivePriceController` will be scaffolded in Phase 2 so the Python bridg
 
 ### 4.1 The Historical Replay Clock
 
-To eliminate look-ahead bias, the engine enforces a strict **timestamp visibility barrier**:
+To eliminate look-ahead bias, the engine enforces a strict **timestamp visibility barrier** pulling up to 500 candles back for rich chart context:
 
 ```sql
 SELECT * FROM Candlesticks
 WHERE Symbol = @Symbol AND Timestamp <= @CurrentReplayTimestamp
-ORDER BY Timestamp ASC;
+ORDER BY Timestamp DESC LIMIT 500;
 ```
 
 Every "Step Forward" interaction increments `CurrentReplayTimestamp` by the selected interval (1m / 5m / 15m / 1H / 4H) and returns only the newly visible data — the chart can never see the future.
@@ -149,20 +149,21 @@ Trades
 | Module | Status |
 |--------|--------|
 | PostgreSQL schema & EF Core migrations | ✅ Complete |
-| Dukascopy CSV data seeder | ✅ Complete — 1M rows (EURUSD, May 2026) |
-| Historical Replay Engine (ReplayService) | ✅ Complete |
+| Dukascopy CSV data seeder | ✅ Complete — Over 1M rows (EURUSD, 2024–2026) |
+| Historical Replay Engine (ReplayService) | ✅ Complete (pulls 500 visible candles) |
 | Overlap Constraint (TradeService) | ✅ Complete |
 | Analytics Engine (MaxDrawdown) | ✅ Complete |
 | Swagger / OpenAPI | ✅ Active at `/swagger` |
-| React Replay UI (Chart + Trade Panel) | ✅ Complete |
+| React Replay UI (TV Visuals, SMA(20), Volume Histogram) | ✅ Complete |
 | Step-Forward Controls (+1m/+5m/+15m/+1H/+4H) | ✅ Complete |
+| Real-time Dynamic Floating P&L | ✅ Complete (Unrealized P&L updates live on every tick) |
+| Session Balance Auto-Update on Trade Close | ✅ Complete (Persists to database on trade exit) |
 | Trade History Panel | ✅ Complete |
 | Analytics Dashboard Page | ✅ Complete |
 | React Router (`/replay`, `/analytics/:id`) | ✅ Complete |
-| JWT Authentication | 🔲 Planned (Phase 2) |
+| JWT Authentication | ✅ Complete (BCrypt register/login, token storage, interceptors) |
 | MT5 Python Live Price Bridge | 🔲 Planned (Phase 2) |
 | Candle Timeframe Aggregation (5m/15m/1H) | 🔲 Planned |
-| Session Balance Auto-Update on Trade Close | 🔲 Planned |
 
 ---
 
@@ -222,12 +223,14 @@ npm run dev
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/Seed/status?symbol=EURUSD` | Check candle count & date range |
-| `POST` | `/api/Seed/import-eurusd?filePath=...` | Bulk import CSV |
+| `POST` | `/api/Auth/register` | Register a new user with secure BCrypt hashing |
+| `POST` | `/api/Auth/login` | Authenticate user and obtain a JWT bearer token |
+| `GET` | `/api/Seed/status?symbol=EURUSD` | Diagnostics: candle count & database date range |
+| `POST` | `/api/Seed/import-file?filePath=...` | Bulk import single CSV file |
 | `POST` | `/api/Replay/start?symbol=EURUSD&startTime=...` | Create a new replay session |
-| `GET` | `/api/Replay/{sessionId}/candles` | Get visible candles (last 200) |
-| `POST` | `/api/Replay/{sessionId}/step?minutes=15` | Advance the replay clock |
-| `POST` | `/api/Trade/open?sessionId=...&direction=Buy&sl=...&tp=...&lots=...` | Place a trade |
+| `GET` | `/api/Replay/{sessionId}/candles` | Get visible candles (last 500) |
+| `POST` | `/api/Replay/{sessionId}/step?minutes=15` | Advance replay clock, returns new time & current balance |
+| `POST` | `/api/Trade/open?sessionId=...&direction=Buy&sl=...&tp=...&lots=...` | Place a trade at market |
 | `GET` | `/api/Trade/history/{sessionId}` | Get all trades for a session |
 | `GET` | `/api/Trade/analytics/{sessionId}` | Get Win Rate, PF, Drawdown |
 
