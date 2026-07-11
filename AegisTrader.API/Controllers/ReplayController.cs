@@ -56,7 +56,7 @@ public class ReplayController : ControllerBase
     [HttpPost("{sessionId}/step")]
     public async Task<IActionResult> StepForward(Guid sessionId, [FromQuery] int minutes = 1)
     {
-        var newTime = await _replayService.StepForward(sessionId, minutes);
-        return Ok(new { CurrentTime = newTime });
+        var result = await _replayService.StepForward(sessionId, minutes);
+        return Ok(result);
     }
 }

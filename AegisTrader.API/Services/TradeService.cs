@@ -13,19 +13,21 @@ public class TradeService
         _context = context;
     }
 
-    // 1. Place a new trade
-    public async Task<Trade> PlaceTrade(Guid sessionId, TradeDirection direction, decimal entry, decimal sl, decimal tp, decimal lotSize, DateTime currentTime)
+    // 1. Place a new trade at the current replay price
+    public async Task<Trade> PlaceTrade(
+        Guid sessionId, TradeDirection direction, decimal entry,
+        decimal sl, decimal tp, decimal lotSize, DateTime currentTime)
     {
         var trade = new Trade
         {
-            SessionId = sessionId,
-            Direction = direction,
+            SessionId  = sessionId,
+            Direction  = direction,
             EntryPrice = entry,
-            StopLoss = sl,
+            StopLoss   = sl,
             TakeProfit = tp,
-            LotSize = lotSize,
-            OpenedAt = currentTime,
-            Status = TradeStatus.Open
+            LotSize    = lotSize,
+            OpenedAt   = currentTime,
+            Status     = TradeStatus.Open
         };
 
         _context.Trades.Add(trade);
@@ -40,6 +42,10 @@ public class TradeService
             .Where(t => t.SessionId == sessionId && t.Status == TradeStatus.Open)
             .ToListAsync();
 
+        // Load the session ONCE so we can update CurrentBalance when trades close.
+        // FIX: Previously, balance was never updated — analytics always showed $10,000.
+        var session = await _context.TradingSessions.FindAsync(sessionId);
+
         foreach (var trade in openTrades)
         {
             bool hitSl = false;
@@ -47,49 +53,52 @@ public class TradeService
 
             if (trade.Direction == TradeDirection.Buy)
             {
-                if (candle.Low <= trade.StopLoss) hitSl = true;
-                if (candle.High >= trade.TakeProfit) hitTp = true;
+                if (candle.Low  <= trade.StopLoss)   hitSl = true;
+                if (candle.High >= trade.TakeProfit)  hitTp = true;
             }
             else // Sell
             {
-                if (candle.High >= trade.StopLoss) hitSl = true;
-                if (candle.Low <= trade.TakeProfit) hitTp = true;
+                if (candle.High >= trade.StopLoss)    hitSl = true;
+                if (candle.Low  <= trade.TakeProfit)  hitTp = true;
             }
 
-            // --- THE OVERLAP CONSTRAINT LOGIC ---
+            // THE OVERLAP CONSTRAINT: If both hit on the same 1m candle,
+            // pessimistically assume the Stop Loss filled first (adverse slippage).
             if (hitSl && hitTp)
-            {
-                // Pessimistic assumption: If both hit in 1 minute, assume Stop Loss first
-                CloseTrade(trade, trade.StopLoss, candle.Timestamp);
-            }
+                CloseTrade(trade, trade.StopLoss, candle.Timestamp, session);
             else if (hitSl)
-            {
-                CloseTrade(trade, trade.StopLoss, candle.Timestamp);
-            }
+                CloseTrade(trade, trade.StopLoss, candle.Timestamp, session);
             else if (hitTp)
-            {
-                CloseTrade(trade, trade.TakeProfit, candle.Timestamp);
-            }
+                CloseTrade(trade, trade.TakeProfit, candle.Timestamp, session);
         }
 
         await _context.SaveChangesAsync();
     }
 
-    private void CloseTrade(Trade trade, decimal exitPrice, DateTime closeTime)
+    // ── Core close logic — computes Pip P&L and updates account balance ────────
+    private void CloseTrade(Trade trade, decimal exitPrice, DateTime closeTime, TradingSession? session)
     {
-        trade.Status = TradeStatus.Closed;
+        trade.Status    = TradeStatus.Closed;
         trade.ExitPrice = exitPrice;
-        trade.ClosedAt = closeTime;
+        trade.ClosedAt  = closeTime;
 
-        // Simplified Pip calculation for EURUSD (1 pip = 0.0001)
-        decimal pipValue = 10; // Standard lot pip value approx $10
-        decimal pips = 0;
+        // Forex pip calculation:
+        // 1 standard lot EURUSD = $10 per pip
+        // 1 pip = 0.0001 (4th decimal place)
+        // Pips moved = price difference × 10,000
+        decimal pipValue = 10m; // per standard lot, per pip
+        decimal pips;
 
         if (trade.Direction == TradeDirection.Buy)
-            pips = (exitPrice - trade.EntryPrice) * 10000;
+            pips = (exitPrice - trade.EntryPrice) * 10000m;
         else
-            pips = (trade.EntryPrice - exitPrice) * 10000;
+            pips = (trade.EntryPrice - exitPrice) * 10000m;
 
         trade.PnL = pips * trade.LotSize * pipValue;
+
+        // FIX: Persist the balance change to the session so analytics are accurate.
+        // Previously this was never done — session.CurrentBalance stayed at 10,000 forever.
+        if (session != null)
+            session.CurrentBalance += trade.PnL;
     }
 }

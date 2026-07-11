@@ -23,19 +23,21 @@ import {
 // ─── Small helper components ──────────────────────────────────────────────────
 
 /** A single card in the stats bar */
-const StatCard = ({ label, value, color = "text-white", icon: Icon }) => (
+const StatCard = ({ label, value, subValue, color = "text-white", icon: Icon }) => (
   <div className="flex items-center gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800">
     {Icon && <Icon size={16} className="text-slate-500" />}
     <div>
       <p className="text-xs text-slate-500 uppercase tracking-widest">{label}</p>
       <p className={`text-sm font-bold font-mono ${color}`}>{value}</p>
+      {subValue && <p className="text-[10px] text-slate-500 font-mono mt-0.5">{subValue}</p>}
     </div>
   </div>
 );
 
 /** A single row in the trade history table */
 const TradeRow = ({ trade }) => {
-  const isWin = trade.pnl > 0;
+  const pnlVal = Number(trade.pnl ?? trade.pnL ?? 0);
+  const isWin = pnlVal > 0;
   const isOpen = trade.status === 0 || trade.status === "Open";
 
   return (
@@ -70,7 +72,7 @@ const TradeRow = ({ trade }) => {
             }`}
           >
             {isWin ? "+" : ""}
-            {Number(trade.pnl).toFixed(2)}
+            {Number(trade.pnl ?? trade.pnL ?? 0).toFixed(2)}
           </span>
         )}
       </td>
@@ -103,13 +105,13 @@ const ReplayPage = () => {
 
   // Session state
   const [session, setSession] = useState(null); // Full session object from API
-
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   // DB diagnostic state
   const [dbStatus, setDbStatus] = useState(null);
+  const [selectedStartTime, setSelectedStartTime] = useState("");
 
   // Trade form state
   const [sl, setSl] = useState("");
@@ -156,6 +158,16 @@ const ReplayPage = () => {
       try {
         const res = await client.get("/Seed/status?symbol=EURUSD");
         setDbStatus(res.data);
+        if (res.data.earliestCandle) {
+          // Parse UTC timestamp and adjust to timezone local string format (YYYY-MM-DDTHH:MM)
+          const date = new Date(res.data.earliestCandle);
+          const year = date.getUTCFullYear();
+          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(date.getUTCDate()).padStart(2, '0');
+          const hours = String(date.getUTCHours()).padStart(2, '0');
+          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+          setSelectedStartTime(`${year}-${month}-${day}T${hours}:${minutes}`);
+        }
       } catch {
         setDbStatus({ count: 0, message: "API unreachable" });
       }
@@ -163,15 +175,20 @@ const ReplayPage = () => {
     checkDb();
   }, []);
 
+
   // ── Session Controls ────────────────────────────────────────────────────────
 
   const startSession = async () => {
     setLoading(true);
     setError(null);
     try {
-      // We start at the earliest point of our seeded data
+      // Use user-selected dynamic startTime (converted to UTC string for backend)
+      const startTime = selectedStartTime
+        ? new Date(selectedStartTime).toISOString()
+        : (dbStatus?.earliestCandle || "2024-01-01T22:30:00Z");
+
       const res = await client.post(
-        "/Replay/start?symbol=EURUSD&startTime=2026-05-01T00:00:00Z"
+        `/Replay/start?symbol=EURUSD&startTime=${startTime}`
       );
       setSession(res.data);
       await fetchCandles(res.data.id);
@@ -188,8 +205,12 @@ const ReplayPage = () => {
     if (!session) return;
     try {
       const res = await client.post(`/Replay/${session.id}/step?minutes=${minutes}`);
-      // Update the local session's currentReplayTimestamp with what the server returned
-      setSession((prev) => ({ ...prev, currentReplayTimestamp: res.data.currentTime }));
+      // Update session currentTime and currentBalance returned by the StepResult endpoint
+      setSession((prev) => ({
+        ...prev,
+        currentReplayTimestamp: res.data.currentTime,
+        currentBalance: res.data.currentBalance
+      }));
       await fetchCandles(session.id);
       await fetchTrades(session.id);
     } catch (err) {
@@ -197,6 +218,7 @@ const ReplayPage = () => {
       setError("Step forward failed.");
     }
   };
+
 
   // ── Trade Execution ─────────────────────────────────────────────────────────
 
@@ -233,8 +255,6 @@ const ReplayPage = () => {
     }
   };
 
-  // ── Derived values ─────────────────────────────────────────────────────────
-
   const currentPrice = candles.length > 0
     ? Number(candles[candles.length - 1].close ?? candles[candles.length - 1].Close).toFixed(5)
     : "—";
@@ -243,9 +263,36 @@ const ReplayPage = () => {
     (t) => t.status === 0 || t.status === "Open"
   ).length;
 
-  const totalPnL = trades
+  // Calculate live floating P&L of open trades
+  const currentPriceNum = Number(currentPrice);
+  const openTrades = trades.filter((t) => t.status === 0 || t.status === "Open");
+  
+  const floatingPnL = openTrades.reduce((sum, t) => {
+    if (isNaN(currentPriceNum)) return sum;
+    const pipValue = 10; // $10 per pip per standard lot
+    let pips = 0;
+    const entry = Number(t.entryPrice ?? t.EntryPrice);
+    const isBuy = t.direction === 0 || t.direction === "Buy";
+
+    if (isBuy) {
+      pips = (currentPriceNum - entry) * 10000;
+    } else {
+      pips = (entry - currentPriceNum) * 10000;
+    }
+
+    const lotSize = Number(t.lotSize ?? t.LotSize ?? 0.1);
+    return sum + (pips * lotSize * pipValue);
+  }, 0);
+
+  const realizedPnL = trades
     .filter((t) => t.status !== 0 && t.status !== "Open")
-    .reduce((sum, t) => sum + Number(t.pnl), 0);
+    .reduce((sum, t) => sum + Number(t.pnl ?? t.pnL ?? 0), 0);
+
+  // Live total P&L = realized closed trades + live floating trades
+  const totalPnL = realizedPnL + floatingPnL;
+
+  const closedBalance = Number(session?.currentBalance ?? session?.CurrentBalance ?? 10000);
+  const runningEquity = closedBalance + floatingPnL;
 
   const formattedTime = session?.currentReplayTimestamp
     ? new Date(session.currentReplayTimestamp).toLocaleString("en-GB", {
@@ -302,6 +349,22 @@ const ReplayPage = () => {
               <BarChart2 size={14} /> Analytics
             </Link>
           )}
+
+          {/* Interactive Start Date picker: Only shown when no session is active */}
+          {!session && dbStatus && dbStatus.count > 0 && (
+            <div className="flex items-center gap-2 mr-2">
+              <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Start From:</label>
+              <input
+                type="datetime-local"
+                value={selectedStartTime}
+                onChange={(e) => setSelectedStartTime(e.target.value)}
+                min={dbStatus.earliestCandle ? new Date(dbStatus.earliestCandle).toISOString().slice(0, 16) : undefined}
+                max={dbStatus.latestCandle ? new Date(dbStatus.latestCandle).toISOString().slice(0, 16) : undefined}
+                className="bg-slate-900 border border-slate-800 text-xs rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none focus:border-blue-600 transition font-mono"
+              />
+            </div>
+          )}
+
           <button
             onClick={startSession}
             disabled={loading || !!session}
@@ -339,12 +402,32 @@ const ReplayPage = () => {
         <StatCard label="Symbol" value="EURUSD" icon={BarChart2} />
         <StatCard label="Current Price" value={currentPrice} color="text-blue-300" icon={Activity} />
         <StatCard label="Replay Time" value={formattedTime} icon={Clock} color="text-slate-300" />
+        
+        {/* Closed Balance */}
+        <StatCard
+          label="Account Balance"
+          value={`$${closedBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          color="text-slate-300"
+          icon={Wallet}
+        />
+
+        {/* Live Equity */}
+        <StatCard
+          label="Account Equity (Live)"
+          value={`$${runningEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          color="text-emerald-400"
+          icon={Wallet}
+        />
+
+        {/* Live Session P&L (Realized & Floating) */}
         <StatCard
           label="Session P&L"
           value={`${totalPnL >= 0 ? "+" : ""}$${totalPnL.toFixed(2)}`}
-          color={totalPnL >= 0 ? "text-green-400" : "text-red-400"}
+          color={totalPnL >= 0 ? "text-emerald-400" : "text-rose-400"}
+          subValue={openTradesCount > 0 ? `Realized: $${realizedPnL >= 0 ? "+" : ""}${realizedPnL.toFixed(2)} | Open: $${floatingPnL >= 0 ? "+" : ""}${floatingPnL.toFixed(2)}` : undefined}
           icon={Wallet}
         />
+
         <StatCard label="Open Trades" value={openTradesCount} color="text-blue-400" icon={Activity} />
       </div>
 
@@ -380,7 +463,7 @@ const ReplayPage = () => {
           {/* Chart */}
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
-              <TradingChart data={candles} />
+              <TradingChart data={candles} trades={trades} />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center">
