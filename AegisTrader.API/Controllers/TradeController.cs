@@ -1,11 +1,13 @@
 using AegisTrader.API.Data;
 using AegisTrader.API.Services;
 using AegisTrader.Core.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace AegisTrader.API.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class TradeController : ControllerBase

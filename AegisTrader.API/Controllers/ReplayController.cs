@@ -1,8 +1,18 @@
+using System.Security.Claims;
 using AegisTrader.API.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AegisTrader.API.Controllers;
 
+/// <summary>
+/// All Replay endpoints require a valid JWT.
+/// LEARNING: [Authorize] on the class means EVERY method inside is protected.
+/// The JWT middleware runs first, validates the token, and populates
+/// HttpContext.User with the claims. If no valid token is present,
+/// ASP.NET Core automatically returns 401 Unauthorized before the method runs.
+/// </summary>
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class ReplayController : ControllerBase
@@ -14,11 +24,24 @@ public class ReplayController : ControllerBase
         _replayService = replayService;
     }
 
+    /// <summary>
+    /// Helper: Extracts the UserId from the validated JWT claims.
+    /// 
+    /// LEARNING: HttpContext.User is a ClaimsPrincipal populated by the
+    /// JWT middleware. ClaimTypes.NameIdentifier is the standard claim
+    /// we embedded in the token when the user logged in — it contains their Guid.
+    /// </summary>
+    private Guid GetUserId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
+    }
+
     [HttpPost("start")]
     public async Task<IActionResult> StartSession(string symbol, DateTime startTime)
     {
-        // For now, we use a fixed Guid for the user until we add Auth
-        var userId = Guid.Empty; 
+        // Real UserId extracted from JWT — no more Guid.Empty placeholder!
+        var userId = GetUserId();
         var session = await _replayService.CreateSession(userId, symbol, startTime);
         return Ok(session);
     }

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
 import TradingChart from "../components/TradingChart";
 import {
@@ -15,6 +16,8 @@ import {
   CheckCircle,
   XCircle,
   BarChart2,
+  LogOut,
+  User,
 } from "lucide-react";
 
 // ─── Small helper components ──────────────────────────────────────────────────
@@ -93,10 +96,14 @@ const TradeRow = ({ trade }) => {
 // ─── Main Page Component ──────────────────────────────────────────────────────
 
 const ReplayPage = () => {
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  const { user, logout } = useAuth();
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   // Session state
   const [session, setSession] = useState(null); // Full session object from API
+
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -279,6 +286,14 @@ const ReplayPage = () => {
         )}
 
         <div className="flex items-center gap-2">
+          {/* Logged-in user display */}
+          {user && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+              <User size={12} className="text-slate-500" />
+              <span>{user.username}</span>
+            </div>
+          )}
+
           {session && (
             <Link
               to={`/analytics/${session.id}`}
@@ -296,7 +311,18 @@ const ReplayPage = () => {
             <Play size={14} />
             {loading ? "Initializing..." : session ? "Session Active" : "Start Session"}
           </button>
+
+          {/* Logout button */}
+          <button
+            onClick={logout}
+            id="btn-logout"
+            title="Logout"
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-400 hover:text-red-400 hover:border-red-900 transition"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
+
       </header>
 
       {/* ── Error Banner ── */}
