@@ -20,6 +20,12 @@ import {
 const LivePage = () => {
   const { user, logout } = useAuth();
 
+  // User-scoped storage keys so each user gets their own session history
+  const userId = user?.userId ?? user?.username ?? 'guest';
+  const STORAGE_BALANCE    = `live_balance_${userId}`;
+  const STORAGE_OPEN       = `live_open_trades_${userId}`;
+  const STORAGE_HISTORY    = `live_trade_history_${userId}`;
+
   // ── States ──────────────────────────────────────────────────────────────────
   const [currentTick, setCurrentTick] = useState({
     symbol: "EURUSD",
@@ -33,20 +39,20 @@ const LivePage = () => {
   const [dbStatus, setDbStatus] = useState(null);
   const [error, setError] = useState(null);
 
-  // Client-side Paper Session Balance
+  // Client-side Paper Session Balance (user-scoped)
   const [balance, setBalance] = useState(() => {
-    const saved = localStorage.getItem('live_balance');
+    const saved = localStorage.getItem(STORAGE_BALANCE);
     return saved ? Number(saved) : 10000;
   });
 
-  // Active trades and history
+  // Active trades and history (user-scoped)
   const [openTrades, setOpenTrades] = useState(() => {
-    const saved = localStorage.getItem('live_open_trades');
+    const saved = localStorage.getItem(STORAGE_OPEN);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [tradeHistory, setTradeHistory] = useState(() => {
-    const saved = localStorage.getItem('live_trade_history');
+    const saved = localStorage.getItem(STORAGE_HISTORY);
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -57,24 +63,28 @@ const LivePage = () => {
   const [tradeMessage, setTradeMessage] = useState(null);
   const [showHistory, setShowHistory] = useState(true);
 
-  // Persist state in localStorage
+  // Persist state in user-scoped localStorage keys
   useEffect(() => {
-    localStorage.setItem('live_balance', balance.toString());
+    localStorage.setItem(STORAGE_BALANCE, balance.toString());
   }, [balance]);
 
   useEffect(() => {
-    localStorage.setItem('live_open_trades', JSON.stringify(openTrades));
+    localStorage.setItem(STORAGE_OPEN, JSON.stringify(openTrades));
   }, [openTrades]);
 
   useEffect(() => {
-    localStorage.setItem('live_trade_history', JSON.stringify(tradeHistory));
+    localStorage.setItem(STORAGE_HISTORY, JSON.stringify(tradeHistory));
   }, [tradeHistory]);
 
-  // Keep a synchronized ref of openTrades to run side-effect-free evaluation inside tick useEffect
+  // Sync ref so tick useEffect can read current open trades without stale closures
   const openTradesRef = useRef(openTrades);
   useEffect(() => {
     openTradesRef.current = openTrades;
   }, [openTrades]);
+
+  // Guard set: track trade IDs currently being closed to prevent duplicate closes
+  // This is critical to prevent React StrictMode double-invocation of effects
+  const processingTradeIds = useRef(new Set());
 
   // Check DB status on mount
   useEffect(() => {
@@ -203,46 +213,38 @@ const LivePage = () => {
       return newCandles;
     });
 
-    // 2. Evaluate active open orders against current tick prices (side-effect safe ref execution)
+    // 2. Evaluate active open orders against current tick prices
+    // Use processingTradeIds guard to ensure each trade is only closed ONCE,
+    // even if React StrictMode fires this effect twice with the same tick.
     const currentActiveTrades = openTradesRef.current;
     if (currentActiveTrades.length > 0) {
-      const closed = [];
-      const active = [];
+      const closedNow = [];
 
       currentActiveTrades.forEach(t => {
-        let hitSl = false;
-        let hitTp = false;
-        let exitPrice = 0;
-        
+        // Skip if this trade is already being processed by a previous effect invocation
+        if (processingTradeIds.current.has(t.id)) return;
+
         const bid = currentTick.bid;
         const ask = currentTick.ask;
         const slPrice = t.sl ? Number(t.sl) : null;
         const tpPrice = t.tp ? Number(t.tp) : null;
+        let hitSl = false;
+        let hitTp = false;
+        let exitPrice = 0;
 
         if (t.direction === "Buy") {
-          // BUY closes at Bid
-          if (slPrice && bid <= slPrice) {
-            hitSl = true;
-            exitPrice = slPrice;
-          } else if (tpPrice && bid >= tpPrice) {
-            hitTp = true;
-            exitPrice = tpPrice;
-          }
+          if (slPrice && bid <= slPrice) { hitSl = true; exitPrice = slPrice; }
+          else if (tpPrice && bid >= tpPrice) { hitTp = true; exitPrice = tpPrice; }
         } else {
-          // SELL closes at Ask
-          if (slPrice && ask >= slPrice) {
-            hitSl = true;
-            exitPrice = slPrice;
-          } else if (tpPrice && ask <= tpPrice) {
-            hitTp = true;
-            exitPrice = tpPrice;
-          }
+          if (slPrice && ask >= slPrice) { hitSl = true; exitPrice = slPrice; }
+          else if (tpPrice && ask <= tpPrice) { hitTp = true; exitPrice = tpPrice; }
         }
 
         if (hitSl || hitTp) {
-          // Calculate final closed P&L
+          // Mark as processing immediately to block duplicate closes
+          processingTradeIds.current.add(t.id);
           const pnl = calculatePnL(t.direction, Number(t.entry), exitPrice, Number(t.lots));
-          closed.push({
+          closedNow.push({
             ...t,
             exit: exitPrice,
             pnl,
@@ -250,15 +252,23 @@ const LivePage = () => {
             closedAt: new Date().toISOString(),
             result: pnl > 0 ? "Win" : "Loss"
           });
-        } else {
-          active.push(t);
         }
       });
 
-      if (closed.length > 0) {
-        setOpenTrades(active);
-        setBalance(b => b + closed.reduce((sum, t) => sum + t.pnl, 0));
-        setTradeHistory(h => [...closed, ...h]);
+      if (closedNow.length > 0) {
+        const closedIds = new Set(closedNow.map(t => t.id));
+        setOpenTrades(prev => prev.filter(t => !closedIds.has(t.id)));
+        setBalance(b => b + closedNow.reduce((sum, t) => sum + t.pnl, 0));
+        // Deduplicate before adding: ensure no trade id already in history
+        setTradeHistory(prev => {
+          const existingIds = new Set(prev.map(t => t.id));
+          const newClosed = closedNow.filter(t => !existingIds.has(t.id));
+          return newClosed.length > 0 ? [...newClosed, ...prev] : prev;
+        });
+        // Remove from processing guard after state updates are queued
+        setTimeout(() => {
+          closedNow.forEach(t => processingTradeIds.current.delete(t.id));
+        }, 2000);
       }
     }
 
@@ -329,9 +339,12 @@ const LivePage = () => {
   };
 
   const closeTradeManually = (id) => {
+    // Guard: prevent closing a trade that's already being closed
+    if (processingTradeIds.current.has(id)) return;
     const tradeToClose = openTrades.find(t => t.id === id);
     if (!tradeToClose) return;
 
+    processingTradeIds.current.add(id);
     const exitPrice = tradeToClose.direction === "Buy" ? currentTick.bid : currentTick.ask;
     const pnl = calculatePnL(tradeToClose.direction, Number(tradeToClose.entry), exitPrice, Number(tradeToClose.lots));
     
@@ -346,7 +359,12 @@ const LivePage = () => {
 
     setOpenTrades(prev => prev.filter(t => t.id !== id));
     setBalance(b => b + pnl);
-    setTradeHistory(h => [closedTrade, ...h]);
+    setTradeHistory(prev => {
+      const existingIds = new Set(prev.map(t => t.id));
+      return existingIds.has(id) ? prev : [closedTrade, ...prev];
+    });
+    // Clean up processing guard
+    setTimeout(() => processingTradeIds.current.delete(id), 2000);
   };
 
   const resetSession = () => {
@@ -355,6 +373,10 @@ const LivePage = () => {
       setOpenTrades([]);
       setTradeHistory([]);
       setTradeMessage(null);
+      processingTradeIds.current.clear();
+      localStorage.removeItem(STORAGE_BALANCE);
+      localStorage.removeItem(STORAGE_OPEN);
+      localStorage.removeItem(STORAGE_HISTORY);
     }
   };
 

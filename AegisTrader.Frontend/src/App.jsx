@@ -72,14 +72,14 @@ function App() {
                             }
                         />
 
-                        {/* Root redirect: if logged in → /replay, else → /login */}
+                        {/* Root redirect: if logged in → /live, else → /login */}
                         <Route
                             path="/"
-                            element={<Navigate to="/replay" replace />}
+                            element={<Navigate to="/live" replace />}
                         />
 
                         {/* Catch-all */}
-                        <Route path="*" element={<Navigate to="/replay" replace />} />
+                        <Route path="*" element={<Navigate to="/live" replace />} />
                     </Routes>
                 </BrowserRouter>
             </div>

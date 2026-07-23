@@ -279,7 +279,18 @@ const TradingChart = ({ data, trades = [] }) => {
             if (trades && trades.length > 0) {
                 const markers = [];
 
+                // Deduplicate trades by id — prefer the closed version (from tradeHistory)
+                // This prevents doubled markers when a just-closed trade appears in both arrays
+                const seenIds = new Map();
                 trades.forEach(t => {
+                    const existing = seenIds.get(t.id);
+                    if (!existing || t.status === 'Closed' || t.status === 1) {
+                        seenIds.set(t.id, t);
+                    }
+                });
+                const uniqueTrades = Array.from(seenIds.values());
+
+                uniqueTrades.forEach(t => {
                     const openTime = t.openedAt ?? t.OpenedAt;
                     if (!openTime) return;
                     const openTimeSec = Math.floor(new Date(openTime).getTime() / 1000);
