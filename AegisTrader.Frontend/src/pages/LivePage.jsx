@@ -99,11 +99,11 @@ const LivePage = () => {
     checkDb();
   }, []);
 
-  // Fetch initial candles baseline
+  // Fetch initial candles baseline — request 500 candles (~8 hours of 1-min data)
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const res = await client.get("/LivePrice/history?symbol=EURUSD");
+        const res = await client.get("/LivePrice/history?symbol=EURUSD&count=500");
         const history = res.data;
         if (history && history.length > 0) {
           // Calculate timestamp offset to align the latest historical candle with the current time
@@ -205,8 +205,8 @@ const LivePage = () => {
           Volume: 0, volume: 0
         };
         newCandles.push(newCandle);
-        // keep chart clean by trimming oldest
-        if (newCandles.length > 150) {
+        // Keep chart clean — trim oldest candles beyond 600 to maintain performance
+        if (newCandles.length > 600) {
           newCandles.shift();
         }
       }

@@ -20,17 +20,22 @@ public class LivePriceController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the last 100 historical candles as a baseline context for the Live Sandbox chart.
-    /// GET /api/LivePrice/history
+    /// Returns the last N historical candles as a baseline context for the Live Sandbox chart.
+    /// GET /api/LivePrice/history?symbol=EURUSD&count=500
     /// </summary>
     [AllowAnonymous]
     [HttpGet("history")]
-    public async Task<IActionResult> GetLiveHistory([FromQuery] string symbol = "EURUSD")
+    public async Task<IActionResult> GetLiveHistory(
+        [FromQuery] string symbol = "EURUSD",
+        [FromQuery] int count = 500)
     {
+        // Clamp to a safe range: minimum 50, maximum 2000 candles
+        count = Math.Max(50, Math.Min(count, 2000));
+
         var candles = await _context.Candlesticks
             .Where(c => c.Symbol == symbol)
             .OrderByDescending(c => c.Timestamp)
-            .Take(100)
+            .Take(count)
             .ToListAsync();
 
         return Ok(candles.OrderBy(c => c.Timestamp).ToList());
