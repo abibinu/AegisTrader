@@ -151,29 +151,41 @@ Trades
 | PostgreSQL schema & EF Core migrations | ✅ Complete |
 | Dukascopy CSV data seeder | ✅ Complete — Over 1M rows (EURUSD, 2024–2026) |
 | Historical Replay Engine (ReplayService) | ✅ Complete (pulls 500 visible candles) |
+| Replay Session Restoration | ✅ Complete (`GET /api/Replay/{sessionId}` + `localStorage` persistence) |
 | Overlap Constraint (TradeService) | ✅ Complete |
-| Analytics Engine (MaxDrawdown) | ✅ Complete |
+| Analytics Engine (MaxDrawdown, Win Rate, Profit Factor) | ✅ Complete |
 | Swagger / OpenAPI | ✅ Active at `/swagger` |
-| React Replay UI (TV Visuals, SMA(20), Volume Histogram) | ✅ Complete |
+| React TradingView Charts (TV Visuals, SMA(20), Volume Overlay, SL/TP Lines) | ✅ Complete |
 | Step-Forward Controls (+1m/+5m/+15m/+1H/+4H) | ✅ Complete |
 | Real-time Dynamic Floating P&L | ✅ Complete (Unrealized P&L updates live on every tick) |
 | Session Balance Auto-Update on Trade Close | ✅ Complete (Persists to database on trade exit) |
 | Trade History Panel | ✅ Complete |
 | Analytics Dashboard Page | ✅ Complete |
-| React Router (`/replay`, `/analytics/:id`) | ✅ Complete |
+| React Router (`/live` [Default], `/replay`, `/analytics/:id`) | ✅ Complete |
 | JWT Authentication | ✅ Complete (BCrypt register/login, token storage, interceptors) |
-| MT5 Python Live Price Bridge | 🔲 Planned (Phase 2) |
-| Candle Timeframe Aggregation (5m/15m/1H) | 🔲 Planned |
+| Live Sandbox & MT5 Python Bridge | ✅ Complete (500ms tick polling, dynamic baseline, 500-candle context) |
+| User-Scoped Session Persistence | ✅ Complete (Per-user balance, open positions & trade history in Live & Replay) |
 
 ---
 
-## 7. Developer Setup
+## 7. Recent Engine Enhancements & Fixes
+
+- **Live Sandbox Default Routing**: Authenticated users default directly to `/live`.
+- **User-Scoped Live & Replay Session Persistence**: Sessions, balances, open positions, and trade histories persist across logins, page refreshes, and navigation (e.g., returning from Analytics back to Replay/Live). Includes explicit **↺ Reset** controls.
+- **Violent Candle & Price Gap Fix**: Initialized Live tick engine with `null` baseline and immediate tick polling to prevent initial candle distortion against historical data.
+- **Strict Mode & Duplicate Execution Protection**: Implemented `processingTradeIds` guard ref to prevent React StrictMode double-invocation trade closure bugs and marker duplication on the chart.
+- **Expanded Chart Context**: Live baseline endpoint updated to fetch up to 500 candles (~8 hours of 1-minute data), with support for up to 2000 candles via `count` parameter.
+- **Replay Baseline Reset**: Configured default Replay starting timestamp to `2024-02-01 00:00`.
+
+---
+
+## 8. Developer Setup
 
 ### Prerequisites
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - [Node.js 20+](https://nodejs.org)
 - [PostgreSQL 16](https://www.postgresql.org/download/)
-- MetaTrader 5 Terminal *(Phase 2 only)*
+- [Python 3.10+](https://www.python.org/) *(for MT5 live price bridge script)*
 
 ### Backend (ASP.NET Core API)
 
@@ -188,6 +200,13 @@ dotnet ef database update
 # 3. Run the API server (port 5273)
 dotnet run
 # Swagger UI available at: http://localhost:5273/swagger
+```
+
+### MT5 Live Price Bridge (Python)
+
+```bash
+# Run the local Python bridge to feed live price ticks to the API
+python -u bridge/mt5_bridge.py
 ```
 
 ### Seed Historical Data
@@ -219,7 +238,7 @@ npm run dev
 
 ---
 
-## 8. API Endpoint Reference
+## 9. API Endpoint Reference
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -228,8 +247,12 @@ npm run dev
 | `GET` | `/api/Seed/status?symbol=EURUSD` | Diagnostics: candle count & database date range |
 | `POST` | `/api/Seed/import-file?filePath=...` | Bulk import single CSV file |
 | `POST` | `/api/Replay/start?symbol=EURUSD&startTime=...` | Create a new replay session |
+| `GET` | `/api/Replay/{sessionId}` | Retrieve details & current state of an existing replay session |
 | `GET` | `/api/Replay/{sessionId}/candles` | Get visible candles (last 500) |
 | `POST` | `/api/Replay/{sessionId}/step?minutes=15` | Advance replay clock, returns new time & current balance |
+| `GET` | `/api/LivePrice/history?symbol=EURUSD&count=500` | Fetch historical baseline candles for live sandbox chart |
+| `GET` | `/api/LivePrice/latest?symbol=EURUSD` | Get latest cached tick price |
+| `POST` | `/api/LivePrice/tick` | Post tick price update (used by MT5 Python bridge) |
 | `POST` | `/api/Trade/open?sessionId=...&direction=Buy&sl=...&tp=...&lots=...` | Place a trade at market |
 | `GET` | `/api/Trade/history/{sessionId}` | Get all trades for a session |
 | `GET` | `/api/Trade/analytics/{sessionId}` | Get Win Rate, PF, Drawdown |
@@ -237,3 +260,4 @@ npm run dev
 ---
 
 *AegisTrader — Enterprise Forex Backtesting Platform*
+
