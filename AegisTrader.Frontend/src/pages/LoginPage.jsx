@@ -59,7 +59,7 @@ const LoginPage = () => {
                 username: res.data.username,
             });
 
-            navigate('/replay', { replace: true });
+            navigate('/live', { replace: true });
 
         } catch (err) {
             const msg = err.response?.data?.message

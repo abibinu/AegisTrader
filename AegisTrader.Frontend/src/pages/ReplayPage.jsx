@@ -101,17 +101,22 @@ const ReplayPage = () => {
   // ── Auth ────────────────────────────────────────────────────────────────────
   const { user, logout } = useAuth();
 
+  // User-scoped storage key for replay session persistence
+  const userId = user?.userId ?? user?.username ?? 'guest';
+  const SESSION_KEY = `replay_session_id_${userId}`;
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   // Session state
-  const [session, setSession] = useState(null); // Full session object from API
+  const [session, setSession] = useState(null);
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   // DB diagnostic state
   const [dbStatus, setDbStatus] = useState(null);
-  const [selectedStartTime, setSelectedStartTime] = useState("");
+  // Default start time: 2024-02-01 00:00 (user can override)
+  const [selectedStartTime, setSelectedStartTime] = useState("2024-02-01T00:00");
 
   // Trade form state
   const [sl, setSl] = useState("");
@@ -124,15 +129,8 @@ const ReplayPage = () => {
   const [trades, setTrades] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // ── API Calls (useCallback prevents stale closure bugs in useEffect) ────────
+  // ── API Calls ────────────────────────────────────────────────────────────────
 
-  /**
-   * LEARNING: useCallback memoizes a function so it doesn't get recreated
-   * on every render. This is important when the function is used as a
-   * dependency in a useEffect — without it, the effect would run in an
-   * infinite loop (function recreated → effect runs → state changes → render
-   * → function recreated → ...).
-   */
   const fetchCandles = useCallback(async (sessionId) => {
     try {
       const res = await client.get(`/Replay/${sessionId}/candles`);
@@ -152,27 +150,44 @@ const ReplayPage = () => {
     }
   }, []);
 
-  // Check DB status on mount so user knows if data is seeded
+  // Check DB status on mount — does NOT overwrite selectedStartTime (user keeps their choice)
   useEffect(() => {
     const checkDb = async () => {
       try {
         const res = await client.get("/Seed/status?symbol=EURUSD");
         setDbStatus(res.data);
-        if (res.data.earliestCandle) {
-          // Parse UTC timestamp and adjust to timezone local string format (YYYY-MM-DDTHH:MM)
-          const date = new Date(res.data.earliestCandle);
-          const year = date.getUTCFullYear();
-          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(date.getUTCDate()).padStart(2, '0');
-          const hours = String(date.getUTCHours()).padStart(2, '0');
-          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-          setSelectedStartTime(`${year}-${month}-${day}T${hours}:${minutes}`);
-        }
+        // Do NOT auto-set selectedStartTime here — user has a sensible default (2024-02-01)
       } catch {
         setDbStatus({ count: 0, message: "API unreachable" });
       }
     };
     checkDb();
+  }, []);
+
+  // ── Restore persisted session on mount ──────────────────────────────────────
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem(SESSION_KEY);
+    if (!savedSessionId) return;
+
+    const restoreSession = async () => {
+      setLoading(true);
+      try {
+        // Fetch the session from API to verify it still exists
+        const res = await client.get(`/Replay/${savedSessionId}`);
+        if (res.data) {
+          setSession(res.data);
+          await fetchCandles(savedSessionId);
+          await fetchTrades(savedSessionId);
+        }
+      } catch {
+        // Session no longer exists on server — clear saved id
+        localStorage.removeItem(SESSION_KEY);
+      } finally {
+        setLoading(false);
+      }
+    };
+    restoreSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -185,12 +200,14 @@ const ReplayPage = () => {
       // Use user-selected dynamic startTime (converted to UTC string for backend)
       const startTime = selectedStartTime
         ? new Date(selectedStartTime).toISOString()
-        : (dbStatus?.earliestCandle || "2024-01-01T22:30:00Z");
+        : "2024-02-01T00:00:00Z";
 
       const res = await client.post(
         `/Replay/start?symbol=EURUSD&startTime=${startTime}`
       );
       setSession(res.data);
+      // Persist sessionId so it survives navigation (analytics → back) and page refresh
+      localStorage.setItem(SESSION_KEY, res.data.id);
       await fetchCandles(res.data.id);
       await fetchTrades(res.data.id);
     } catch (err) {
@@ -198,6 +215,18 @@ const ReplayPage = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Reset: clear persisted session and start fresh
+  const resetSession = () => {
+    if (window.confirm("Reset current session? All trades and progress will be cleared from this view.")) {
+      localStorage.removeItem(SESSION_KEY);
+      setSession(null);
+      setCandles([]);
+      setTrades([]);
+      setError(null);
+      setTradeMessage(null);
     }
   };
 
@@ -380,6 +409,18 @@ const ReplayPage = () => {
             {loading ? "Initializing..." : session ? "Session Active" : "Start Session"}
           </button>
 
+          {/* Reset Session button — only visible when a session is active */}
+          {session && (
+            <button
+              onClick={resetSession}
+              id="btn-reset-session"
+              title="Reset Session"
+              className="flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-400 hover:bg-red-950/60 hover:text-red-400 hover:border-red-800 transition"
+            >
+              ↺ Reset
+            </button>
+          )}
+
           {/* Logout button */}
           <button
             onClick={logout}
@@ -390,6 +431,7 @@ const ReplayPage = () => {
             <LogOut size={14} />
           </button>
         </div>
+
 
       </header>
 

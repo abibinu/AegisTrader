@@ -36,6 +36,12 @@ public class ReplayService
         return session;
     }
 
+    // 1b. Fetch an existing session by ID (used for frontend session restoration after navigation)
+    public async Task<TradingSession?> GetSession(Guid sessionId)
+    {
+        return await _context.TradingSessions.FindAsync(sessionId);
+    }
+
     // 2. The Timestamp Visibility Barrier — the core anti-look-ahead mechanism.
     // FIX: Increased from Take(200) to Take(500) so the chart shows ~8 hours of
     // 1-minute history at a time, giving much richer context for ICT/SMC analysis.

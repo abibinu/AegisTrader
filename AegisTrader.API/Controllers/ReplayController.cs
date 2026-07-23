@@ -59,4 +59,17 @@ public class ReplayController : ControllerBase
         var result = await _replayService.StepForward(sessionId, minutes);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Fetch an existing session by ID so the frontend can restore state after navigation.
+    /// GET /api/Replay/{sessionId}
+    /// </summary>
+    [HttpGet("{sessionId}")]
+    public async Task<IActionResult> GetSession(Guid sessionId)
+    {
+        var session = await _replayService.GetSession(sessionId);
+        if (session == null)
+            return NotFound();
+        return Ok(session);
+    }
 }

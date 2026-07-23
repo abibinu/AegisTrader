@@ -27,13 +27,10 @@ const LivePage = () => {
   const STORAGE_HISTORY    = `live_trade_history_${userId}`;
 
   // ── States ──────────────────────────────────────────────────────────────────
-  const [currentTick, setCurrentTick] = useState({
-    symbol: "EURUSD",
-    bid: 1.08500,
-    ask: 1.08512,
-    timestamp: new Date().toISOString()
-  });
-  
+  // Start null — we wait for the real first tick from the API before rolling candles.
+  // This prevents the 1.08500 placeholder creating a massive gap candle against the
+  // historical baseline which ends at ~1.138.
+  const [currentTick, setCurrentTick] = useState(null);
   const [prevTick, setPrevTick] = useState(null);
   const [candles, setCandles] = useState([]);
   const [dbStatus, setDbStatus] = useState(null);
@@ -136,22 +133,24 @@ const LivePage = () => {
       try {
         const res = await client.get("/LivePrice/latest?symbol=EURUSD");
         const tick = res.data;
-        
+        const newTick = {
+          symbol: tick.symbol ?? tick.Symbol,
+          bid: Number(tick.bid ?? tick.Bid),
+          ask: Number(tick.ask ?? tick.Ask),
+          timestamp: tick.timestamp ?? tick.Timestamp
+        };
         setCurrentTick(prev => {
           setPrevTick(prev);
-          return {
-            symbol: tick.symbol ?? tick.Symbol,
-            bid: Number(tick.bid ?? tick.Bid),
-            ask: Number(tick.ask ?? tick.Ask),
-            timestamp: tick.timestamp ?? tick.Timestamp
-          };
+          return newTick;
         });
       } catch (err) {
         console.error("Failed to poll tick:", err);
       }
     };
 
-    // Poll every 500ms
+    // Fetch the FIRST real tick immediately on mount so we never use the null placeholder
+    pollTick();
+    // Then continue polling every 500ms
     const interval = setInterval(pollTick, 500);
     return () => clearInterval(interval);
   }, []);
@@ -382,8 +381,8 @@ const LivePage = () => {
 
   // ── Derived Values ──────────────────────────────────────────────────────────
   
-  // Calculate dynamic floating open P&L
-  const floatingPnL = openTrades.reduce((sum, t) => {
+  // Calculate dynamic floating open P&L — guard against null tick on initial load
+  const floatingPnL = !currentTick ? 0 : openTrades.reduce((sum, t) => {
     const currentPrice = t.direction === "Buy" ? currentTick.bid : currentTick.ask;
     return sum + calculatePnL(t.direction, Number(t.entry), currentPrice, Number(t.lots));
   }, 0);
@@ -392,8 +391,8 @@ const LivePage = () => {
   const runningEquity = balance + floatingPnL;
   const totalPnL = realizedPnL + floatingPnL;
 
-  // Flash color helper for tick updates
-  const tickColor = prevTick
+  // Flash color helper for tick updates — guard against null
+  const tickColor = currentTick && prevTick
     ? currentTick.bid > prevTick.bid
       ? "text-emerald-400"
       : currentTick.bid < prevTick.bid
@@ -466,7 +465,7 @@ const LivePage = () => {
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-widest">Current Bid</p>
             <p className={`text-sm font-bold font-mono transition-colors duration-200 ${tickColor}`}>
-              {currentTick.bid.toFixed(5)}
+              {currentTick ? currentTick.bid.toFixed(5) : "Loading..."}
             </p>
           </div>
         </div>
@@ -574,7 +573,9 @@ const LivePage = () => {
                     </thead>
                     <tbody>
                       {openTrades.map((t) => {
-                        const curPrice = t.direction === "Buy" ? currentTick.bid : currentTick.ask;
+                        const curPrice = currentTick
+                          ? (t.direction === "Buy" ? currentTick.bid : currentTick.ask)
+                          : Number(t.entry);
                         const pnl = calculatePnL(t.direction, Number(t.entry), curPrice, Number(t.lots));
                         return (
                           <tr key={t.id} className="border-b border-slate-800/40 hover:bg-slate-800/35 transition font-mono text-xs">
@@ -672,11 +673,11 @@ const LivePage = () => {
             <div className="grid grid-cols-2 gap-2 mb-4">
               <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-center">
                 <p className="text-[10px] text-slate-500 mb-0.5">BID (Sell Price)</p>
-                <p className="font-mono text-sm font-bold text-rose-400">{currentTick.bid.toFixed(5)}</p>
+                <p className="font-mono text-sm font-bold text-rose-400">{currentTick ? currentTick.bid.toFixed(5) : "—"}</p>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-center">
                 <p className="text-[10px] text-slate-500 mb-0.5">ASK (Buy Price)</p>
-                <p className="font-mono text-sm font-bold text-emerald-400">{currentTick.ask.toFixed(5)}</p>
+                <p className="font-mono text-sm font-bold text-emerald-400">{currentTick ? currentTick.ask.toFixed(5) : "—"}</p>
               </div>
             </div>
 
@@ -761,7 +762,7 @@ const LivePage = () => {
                 >
                   <TrendingUp size={22} />
                   <span className="text-sm">BUY</span>
-                  <span className="text-xs font-mono text-green-700">{currentTick.ask.toFixed(5)}</span>
+                  <span className="text-xs font-mono text-green-700">{currentTick ? currentTick.ask.toFixed(5) : "—"}</span>
                 </button>
                 <button
                   onClick={() => placeTrade("Sell")}
@@ -769,7 +770,7 @@ const LivePage = () => {
                 >
                   <TrendingDown size={22} />
                   <span className="text-sm">SELL</span>
-                  <span className="text-xs font-mono text-red-700">{currentTick.bid.toFixed(5)}</span>
+                  <span className="text-xs font-mono text-red-700">{currentTick ? currentTick.bid.toFixed(5) : "—"}</span>
                 </button>
               </div>
             </div>
