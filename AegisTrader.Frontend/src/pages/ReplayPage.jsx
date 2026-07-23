@@ -312,9 +312,14 @@ const ReplayPage = () => {
           <h1 className="text-xl font-bold tracking-tight">
             Aegis<span className="text-blue-400">Trader</span>
           </h1>
-          <span className="text-xs text-slate-500 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-700">
-            REPLAY ENGINE
-          </span>
+          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-0.5 rounded-lg text-xs">
+            <span className="bg-slate-800 text-white font-semibold px-2.5 py-1 rounded-md cursor-default">
+              Replay Engine
+            </span>
+            <Link to="/live" className="text-slate-400 hover:text-white font-semibold px-2.5 py-1 rounded-md transition">
+              Live Sandbox
+            </Link>
+          </div>
         </div>
 
         {/* DB Status Indicator */}

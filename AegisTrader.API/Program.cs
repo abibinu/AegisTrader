@@ -60,6 +60,7 @@ builder.Services.AddScoped<DataImportService>();
 builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ReplayService>();
 builder.Services.AddScoped<TradeService>();
+builder.Services.AddSingleton<LivePriceCache>();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>

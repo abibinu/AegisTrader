@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ReplayPage    from './pages/ReplayPage';
+import LivePage      from './pages/LivePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import LoginPage     from './pages/LoginPage';
 
@@ -47,6 +48,16 @@ function App() {
                             element={
                                 <ProtectedRoute>
                                     <ReplayPage />
+                                </ProtectedRoute>
+                            }
+                        />
+
+                        {/* Protected: Live Trading Arena */}
+                        <Route
+                            path="/live"
+                            element={
+                                <ProtectedRoute>
+                                    <LivePage />
                                 </ProtectedRoute>
                             }
                         />

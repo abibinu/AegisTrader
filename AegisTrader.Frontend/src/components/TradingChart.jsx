@@ -17,6 +17,7 @@ const TradingChart = ({ data, trades = [] }) => {
     const smaRef = useRef(null);
     const volumeRef = useRef(null);
     const markersApiRef = useRef(null);
+    const priceLinesRef = useRef([]);
 
     // Local HUD state for hover values
     const [hudData, setHudData] = useState(null);
@@ -226,14 +227,66 @@ const TradingChart = ({ data, trades = [] }) => {
             });
         }
 
+        // Clear previous price lines
+        if (priceLinesRef.current) {
+            priceLinesRef.current.forEach(line => {
+                try {
+                    seriesRef.current.removePriceLine(line);
+                } catch (e) {
+                    console.error("Failed to remove price line:", e);
+                }
+            });
+            priceLinesRef.current = [];
+        }
+
+        // Draw new price lines for active open trades (both live and replay)
+        if (trades && trades.length > 0) {
+            trades.forEach(t => {
+                const isOpen = t.status === 0 || t.status === 'Open' || t.Status === 0 || t.Status === 'Open' || t.Status === 'open' || t.status === 'open';
+                if (isOpen) {
+                    const stopLoss = Number(t.sl ?? t.StopLoss ?? t.stopLoss ?? 0);
+                    const takeProfit = Number(t.tp ?? t.TakeProfit ?? t.takeProfit ?? 0);
+
+                    if (stopLoss > 0) {
+                        const slLine = seriesRef.current.createPriceLine({
+                            price: stopLoss,
+                            color: '#ef4444', // Red for SL
+                            lineWidth: 1,
+                            lineStyle: 1, // Dotted
+                            axisLabelVisible: true,
+                            title: `SL: ${stopLoss.toFixed(5)}`,
+                        });
+                        priceLinesRef.current.push(slLine);
+                    }
+
+                    if (takeProfit > 0) {
+                        const tpLine = seriesRef.current.createPriceLine({
+                            price: takeProfit,
+                            color: '#10b981', // Green for TP
+                            lineWidth: 1,
+                            lineStyle: 1, // Dotted
+                            axisLabelVisible: true,
+                            title: `TP: ${takeProfit.toFixed(5)}`,
+                        });
+                        priceLinesRef.current.push(tpLine);
+                    }
+                }
+            });
+        }
+
         // Execution markers plotting
         if (markersApiRef.current) {
             if (trades && trades.length > 0) {
                 const markers = [];
 
                 trades.forEach(t => {
-                    const openTimeSec = Math.floor(new Date(t.openedAt ?? t.OpenedAt).getTime() / 1000);
+                    const openTime = t.openedAt ?? t.OpenedAt;
+                    if (!openTime) return;
+                    const openTimeSec = Math.floor(new Date(openTime).getTime() / 1000);
+                    if (isNaN(openTimeSec)) return;
+
                     const isBuy = t.direction === 0 || t.direction === 'Buy';
+                    const entryPrice = Number(t.entryPrice ?? t.EntryPrice ?? t.entry ?? 0);
 
                     // Plot Entry Marker
                     markers.push({
@@ -241,19 +294,25 @@ const TradingChart = ({ data, trades = [] }) => {
                         position: isBuy ? 'belowBar' : 'aboveBar',
                         color: isBuy ? '#10b981' : '#ef4444',
                         shape: isBuy ? 'arrowUp' : 'arrowDown',
-                        text: isBuy ? `BUY @ ${Number(t.entryPrice).toFixed(5)}` : `SELL @ ${Number(t.entryPrice).toFixed(5)}`,
+                        text: isBuy ? `BUY @ ${entryPrice.toFixed(5)}` : `SELL @ ${entryPrice.toFixed(5)}`,
                     });
 
                     // Plot Exit Marker if trade is Closed
                     if (t.status === 1 || t.status === 'Closed') {
-                        const closeTimeSec = Math.floor(new Date(t.closedAt ?? t.ClosedAt).getTime() / 1000);
+                        const closeTime = t.closedAt ?? t.ClosedAt;
+                        if (!closeTime) return;
+                        const closeTimeSec = Math.floor(new Date(closeTime).getTime() / 1000);
+                        if (isNaN(closeTimeSec)) return;
+
                         const isWin = Number(t.pnl ?? t.pnL ?? 0) > 0;
+                        const exitPrice = Number(t.exitPrice ?? t.ExitPrice ?? t.exit ?? 0);
+                        
                         markers.push({
                             time: closeTimeSec,
                             position: isBuy ? 'aboveBar' : 'belowBar',
                             color: isWin ? '#10b981' : '#ef4444',
                             shape: 'circle',
-                            text: `EXIT @ ${Number(t.exitPrice).toFixed(5)} (${isWin ? '+' : ''}${Number(t.pnl ?? t.pnL ?? 0).toFixed(2)})`,
+                            text: `EXIT @ ${exitPrice.toFixed(5)} (${isWin ? '+' : ''}${Number(t.pnl ?? t.pnL ?? 0).toFixed(2)})`,
                         });
                     }
                 });
