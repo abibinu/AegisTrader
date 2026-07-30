@@ -182,20 +182,26 @@ const TradingChart = ({ data, trades = [] }) => {
             }
         }
 
-        // Map volume dataset (generating synthetic tick volume based on spread if volume is 0)
+        // Map volume dataset (generating deterministic synthetic tick volume if volume is 0)
         const formattedVolume = data
             .map(c => {
                 const openVal = Number(c.open ?? c.Open);
+                const highVal = Number(c.high ?? c.High);
+                const lowVal = Number(c.low ?? c.Low);
                 const closeVal = Number(c.close ?? c.Close);
                 const rawVol = Number(c.volume ?? c.Volume ?? 0);
-                
-                // If database volume is 0, generate synthetic tick volume (forex-style correlation)
+                const timeSec = Math.floor(new Date(c.timestamp ?? c.Timestamp).getTime() / 1000);
+
+                // Deterministic synthetic volume calculation (proportional to candle range + timestamp hash)
+                // Ensures volume bars remain stable and stationary during tick updates
+                const range = Math.max(0.00001, highVal - lowVal);
+                const pseudoHash = (timeSec % 37) + 5;
                 const volumeValue = rawVol > 0
                     ? rawVol
-                    : Math.floor(Math.abs(closeVal - openVal) * 150000 + Math.random() * 25 + 5);
+                    : Math.floor(range * 180000 + pseudoHash);
 
                 return {
-                    time: Math.floor(new Date(c.timestamp ?? c.Timestamp).getTime() / 1000),
+                    time: timeSec,
                     value: volumeValue,
                     // Semitransparent fill: Green volume if candle is bullish, red if bearish
                     color: closeVal >= openVal ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.28)',
