@@ -103,10 +103,13 @@ const LivePage = () => {
         const res = await client.get("/LivePrice/history?symbol=EURUSD&count=500");
         const history = res.data;
         if (history && history.length > 0) {
-          // Calculate timestamp offset to align the latest historical candle with the current time
+          // Calculate timestamp offset to align the latest historical candle with 1 minute before current time
+          // This ensures historical candles remain pristine, and live ticks create a fresh live candle for the current minute.
           const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
           const currentTime = Date.now();
-          const offsetMs = currentTime - latestCandleTime;
+          // Target historical end time: 1 minute (60,000ms) before currentTime
+          const targetHistoricalEndTime = currentTime - 60000;
+          const offsetMs = targetHistoricalEndTime - latestCandleTime;
 
           // Shift all historical candles forward by this offset
           const shiftedHistory = history.map(c => {
@@ -193,14 +196,20 @@ const LivePage = () => {
         }
         newCandles[newCandles.length - 1] = lastCandle;
       } else {
-        // Create new candle object
+        // Create new candle object starting at current tick
+        const prevClose = Number(lastCandle.Close ?? lastCandle.close ?? price);
+        // Connect open to previous close if within normal tick range for seamless candle continuity
+        const openPrice = Math.abs(price - prevClose) < 0.00050 ? prevClose : price;
+        const highPrice = Math.max(openPrice, price);
+        const lowPrice  = Math.min(openPrice, price);
+
         const newCandle = {
           Timestamp: currentTick.timestamp,
           timestamp: currentTick.timestamp,
-          Open: price, open: price,
-          High: price, high: price,
-          Low: price, low: price,
-          Close: price, close: price,
+          Open: openPrice, open: openPrice,
+          High: highPrice, high: highPrice,
+          Low: lowPrice,   low: lowPrice,
+          Close: price,    close: price,
           Volume: 0, volume: 0
         };
         newCandles.push(newCandle);

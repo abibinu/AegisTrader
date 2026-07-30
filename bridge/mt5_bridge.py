@@ -50,6 +50,7 @@ def run_bridge():
     except Exception as e:
         print(f">>> Failed to load baseline from DB: {e}. Defaulting to {bid:.5f}")
 
+    anchor_bid = bid  # Store starting anchor price to anchor random walk scale
     spread = 0.00012  # 1.2 pip spread
     ask = bid + spread
 
@@ -69,14 +70,18 @@ def run_bridge():
                 else:
                     print(f"Warning: Failed to read {SYMBOL} tick from terminal. Using last known prices.")
             else:
-                # Fallback Simulator mode: Random walk generator mimicking live market ticks
-                change = random.uniform(-0.00008, 0.00008)
-                bid = round(bid + change, 5)
-                # Keep EURUSD within standard boundaries (1.05000 to 1.15000)
+                # Fallback Simulator mode: Realistic micro-ticks matching historical 1m candle scale (~0.00010 to 0.00020 per minute)
+                drift = (anchor_bid - bid) * 0.005  # Gentle mean reversion to keep scale consistent
+                noise = random.uniform(-0.000015, 0.000015)  # 0.15 fractional pips per 500ms tick
+                bid = round(bid + drift + noise, 5)
+
+                # Keep EURUSD within boundaries
                 if bid < 1.04000:
                     bid = 1.04500
+                    anchor_bid = bid
                 elif bid > 1.16000:
                     bid = 1.15500
+                    anchor_bid = bid
                 ask = round(bid + spread, 5)
 
             # Build tick payload

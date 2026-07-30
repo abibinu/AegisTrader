@@ -65,17 +65,27 @@ public class LivePriceController : ControllerBase
     /// </summary>
     [AllowAnonymous]
     [HttpGet("latest")]
-    public IActionResult GetLatestPrice([FromQuery] string symbol = "EURUSD")
+    public async Task<IActionResult> GetLatestPrice([FromQuery] string symbol = "EURUSD")
     {
         var tick = _priceCache.GetPrice(symbol);
         if (tick == null)
         {
-            // Seed a reasonable default if bridge isn't running yet (cold start fallback)
+            // Seed baseline from latest DB candle if bridge isn't running yet (cold start fallback)
+            var latestDbCandle = await _context.Candlesticks
+                .Where(c => c.Symbol == symbol)
+                .OrderByDescending(c => c.Timestamp)
+                .FirstOrDefaultAsync();
+
+            decimal defaultBid = latestDbCandle != null ? latestDbCandle.Close : 1.13850m;
+            decimal defaultAsk = defaultBid + 0.00012m;
+
+            _priceCache.UpdatePrice(symbol, defaultBid, defaultAsk);
+
             return Ok(new
             {
                 Symbol = symbol.ToUpperInvariant(),
-                Bid = 1.08500m,
-                Ask = 1.08512m,
+                Bid = defaultBid,
+                Ask = defaultAsk,
                 Timestamp = DateTime.UtcNow,
                 IsPlaceholder = true
             });
