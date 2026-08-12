@@ -26,6 +26,8 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
     const volumeRef = useRef(null);
     const markersApiRef = useRef(null);
     const priceLinesRef = useRef([]);
+    const initialScrollDoneRef = useRef(false);
+    const prevTimeframeRef = useRef(timeframe);
 
     // Local HUD state for hover values
     const [hudData, setHudData] = useState(null);
@@ -350,10 +352,15 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             }
         }
 
-        // Scroll to the end to keep latest candle visible
-        chartRef.current.timeScale().scrollToPosition(0, true);
+        // Auto-scroll camera to latest candle ONLY on initial mount or timeframe switch.
+        // When price plays forward (live ticks or replay steps), do NOT snap/stick camera to rightmost side.
+        if (!initialScrollDoneRef.current || prevTimeframeRef.current !== timeframe) {
+            initialScrollDoneRef.current = true;
+            prevTimeframeRef.current = timeframe;
+            chartRef.current.timeScale().scrollToPosition(0, false);
+        }
 
-    }, [data, trades]);
+    }, [data, trades, timeframe]);
 
     return (
         <div className="relative w-full rounded-xl overflow-hidden bg-[#090d16] border border-slate-800">

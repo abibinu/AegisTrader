@@ -127,6 +127,12 @@ const LivePage = () => {
     openTradesRef.current = openTrades;
   }, [openTrades]);
 
+  // Sync ref for currentTick so fetchBaselineHistory can read current tick without a re-render loop
+  const currentTickRef = useRef(currentTick);
+  useEffect(() => {
+    currentTickRef.current = currentTick;
+  }, [currentTick]);
+
   // Guard set: track trade IDs currently being closed to prevent duplicate closes
   // This is critical to prevent React StrictMode double-invocation of effects
   const processingTradeIds = useRef(new Set());
@@ -182,10 +188,10 @@ const LivePage = () => {
         });
 
         // Price baseline normalization:
-        // If currentTick is available, shift historical price levels vertically so the last historical close
-        // seamlessly matches currentTick.bid. This completely eliminates the 150-pip gap spike candle!
+        // Use currentTickRef (no hook dependency loop!) to shift historical price levels vertically
+        // so the last historical close seamlessly matches currentTick.bid.
         const latestClose = shiftedHistory[shiftedHistory.length - 1].close;
-        const targetPrice = currentTick ? currentTick.bid : null;
+        const targetPrice = currentTickRef.current ? currentTickRef.current.bid : null;
         if (targetPrice && Math.abs(targetPrice - latestClose) > 0.00050) {
           const pDiff = targetPrice - latestClose;
           shiftedHistory = shiftedHistory.map(c => ({
@@ -202,7 +208,7 @@ const LivePage = () => {
     } catch (err) {
       console.error("Failed to load historical candles:", err);
     }
-  }, [currentTick]);
+  }, []);
 
   useEffect(() => {
     fetchBaselineHistory(timeframe);
