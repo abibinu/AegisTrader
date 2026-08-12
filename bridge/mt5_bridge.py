@@ -40,7 +40,7 @@ def run_bridge():
     bid = 1.13850
     # Fetch last known price from DB as baseline to avoid chart gaps
     try:
-        res = requests.get("http://localhost:5273/api/LivePrice/history?symbol=" + SYMBOL, timeout=2.0)
+        res = requests.get(f"http://localhost:5273/api/LivePrice/history?symbol={SYMBOL}&count=1", timeout=5.0)
         if res.status_code == 200:
             history = res.json()
             if history and len(history) > 0:

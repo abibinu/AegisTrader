@@ -33,8 +33,8 @@ public class LivePriceController : ControllerBase
         [FromQuery] int count = 500,
         [FromQuery] int timeframe = 1)
     {
-        // Clamp aggregated output bars to a safe range: 50–500
-        count = Math.Max(50, Math.Min(count, 500));
+        // Clamp aggregated output bars to a safe range: 1–500
+        count = Math.Max(1, Math.Min(count, 500));
         // Ensure timeframe is a valid value
         timeframe = timeframe <= 1 ? 1 : timeframe;
 
