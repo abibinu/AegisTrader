@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
@@ -60,6 +60,40 @@ const LivePage = () => {
   const [tradeMessage, setTradeMessage] = useState(null);
   const [showHistory, setShowHistory] = useState(true);
 
+  // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
+  const [timeframe, setTimeframe] = useState(1);
+
+  // Helper: aggregate an array of 1m candle objects into N-minute candles (client-side)
+  const aggregateCandles = useCallback((oneMinuteCandles, tf) => {
+    if (tf <= 1) return oneMinuteCandles;
+    const groups = new Map();
+    for (const c of oneMinuteCandles) {
+      const ts = new Date(c.timestamp ?? c.Timestamp).getTime();
+      const epochMin = Math.floor(ts / 60000);
+      const bucket = Math.floor(epochMin / tf) * tf * 60000; // bucket start in ms
+      if (!groups.has(bucket)) {
+        groups.set(bucket, { ...c, timestamp: new Date(bucket).toISOString(), Timestamp: new Date(bucket).toISOString() });
+      } else {
+        const existing = groups.get(bucket);
+        const curHigh = Number(c.high ?? c.High);
+        const curLow  = Number(c.low  ?? c.Low);
+        const existHigh = Number(existing.high ?? existing.High);
+        const existLow  = Number(existing.low  ?? existing.Low);
+        existing.high  = curHigh > existHigh ? curHigh : existHigh;
+        existing.High  = existing.high;
+        existing.low   = curLow < existLow ? curLow : existLow;
+        existing.Low   = existing.low;
+        existing.close = c.close ?? c.Close;
+        existing.Close = existing.close;
+        existing.volume = (Number(existing.volume ?? existing.Volume ?? 0)) + Number(c.volume ?? c.Volume ?? 0);
+        existing.Volume = existing.volume;
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) =>
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, []);
+
   // Persist state in user-scoped localStorage keys
   useEffect(() => {
     localStorage.setItem(STORAGE_BALANCE, balance.toString());
@@ -96,39 +130,41 @@ const LivePage = () => {
     checkDb();
   }, []);
 
-  // Fetch initial candles baseline — request 500 candles (~8 hours of 1-min data)
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const res = await client.get("/LivePrice/history?symbol=EURUSD&count=500");
-        const history = res.data;
-        if (history && history.length > 0) {
-          // Calculate timestamp offset to align the latest historical candle with 1 minute before current time
-          // This ensures historical candles remain pristine, and live ticks create a fresh live candle for the current minute.
-          const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
-          const currentTime = Date.now();
-          // Target historical end time: 1 minute (60,000ms) before currentTime
-          const targetHistoricalEndTime = currentTime - 60000;
-          const offsetMs = targetHistoricalEndTime - latestCandleTime;
+  // Fetch initial candles baseline — on timeframe change, re-fetch so the baseline aligns with the new TF
+  const fetchBaselineHistory = useCallback(async (tf = 1) => {
+    try {
+      // Fetch enough 1m candles to cover 500 aggregated bars
+      const rawCount = Math.min(500 * Math.max(tf, 1), 2000);
+      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=${rawCount}`);
+      const history = res.data;
+      if (history && history.length > 0) {
+        // Align history end to 1 minute before current time
+        const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
+        const currentTime = Date.now();
+        const targetHistoricalEndTime = currentTime - 60000;
+        const offsetMs = targetHistoricalEndTime - latestCandleTime;
 
-          // Shift all historical candles forward by this offset
-          const shiftedHistory = history.map(c => {
-            const originalTime = new Date(c.timestamp ?? c.Timestamp).getTime();
-            const newTime = new Date(originalTime + offsetMs).toISOString();
-            return {
-              ...c,
-              timestamp: newTime,
-              Timestamp: newTime
-            };
-          });
-          setCandles(shiftedHistory);
-        }
-      } catch (err) {
-        console.error("Failed to load historical candles:", err);
+        const shiftedHistory = history.map(c => {
+          const originalTime = new Date(c.timestamp ?? c.Timestamp).getTime();
+          const newTime = new Date(originalTime + offsetMs).toISOString();
+          return { ...c, timestamp: newTime, Timestamp: newTime };
+        });
+        setCandles(shiftedHistory);
       }
-    };
-    fetchHistory();
+    } catch (err) {
+      console.error("Failed to load historical candles:", err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchBaselineHistory(1);
+  }, [fetchBaselineHistory]);
+
+  const handleLiveTimeframeChange = useCallback((tf) => {
+    setTimeframe(tf);
+    // Re-fetch enough 1m candles to fill the viewport at the new timeframe
+    fetchBaselineHistory(tf);
+  }, [fetchBaselineHistory]);
 
   // ── Tick Polling & Chart Rolling Engine ─────────────────────────────────────
   useEffect(() => {
@@ -531,7 +567,12 @@ const LivePage = () => {
 
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
-              <TradingChart data={candles} trades={openTrades.concat(tradeHistory)} />
+              <TradingChart
+                data={aggregateCandles(candles, timeframe)}
+                trades={openTrades.concat(tradeHistory)}
+                timeframe={timeframe}
+                onTimeframeChange={handleLiveTimeframeChange}
+              />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
                 <Activity className="w-8 h-8 text-blue-500 animate-pulse" />

@@ -10,7 +10,15 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
  *  - Custom HUD legend showing candle O, H, L, C, V, price change %, and SMA
  *  - Dotted grid lines and TV-style scale margins
  */
-const TradingChart = ({ data, trades = [] }) => {
+const TIMEFRAMES = [
+    { label: '1m',  value: 1   },
+    { label: '5m',  value: 5   },
+    { label: '15m', value: 15  },
+    { label: '1H',  value: 60  },
+    { label: '4H',  value: 240 },
+];
+
+const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
@@ -349,27 +357,48 @@ const TradingChart = ({ data, trades = [] }) => {
 
     return (
         <div className="relative w-full rounded-xl overflow-hidden bg-[#090d16] border border-slate-800">
-            {/* Custom Interactive HUD / Legend overlay */}
-            <div className="absolute top-3 left-4 z-10 flex flex-wrap gap-3 sm:gap-4 text-xs font-mono bg-slate-950/85 backdrop-blur border border-slate-800/80 px-4 py-2.5 rounded-lg text-slate-400 select-none shadow-lg">
-                {hudData ? (
-                    <>
-                        <div>O <span className="text-white ml-0.5">{hudData.open.toFixed(5)}</span></div>
-                        <div>H <span className="text-white ml-0.5">{hudData.high.toFixed(5)}</span></div>
-                        <div>L <span className="text-white ml-0.5">{hudData.low.toFixed(5)}</span></div>
-                        <div>C <span className="text-white ml-0.5">{hudData.close.toFixed(5)}</span></div>
-                        <div>V <span className="text-white ml-0.5">{hudData.volume.toLocaleString()}</span></div>
-                        {hudData.sma && (
-                            <div className="text-amber-400 font-semibold">
-                                SMA(20) <span className="ml-0.5">{hudData.sma.toFixed(5)}</span>
+            {/* Chart header: Timeframe switcher + HUD legend */}
+            <div className="flex items-center justify-between px-4 pt-3 pb-1 gap-4">
+                {/* Timeframe switcher buttons */}
+                <div className="flex items-center gap-1">
+                    {TIMEFRAMES.map(tf => (
+                        <button
+                            key={tf.value}
+                            id={`tf-btn-${tf.label}`}
+                            onClick={() => onTimeframeChange && onTimeframeChange(tf.value)}
+                            className={`px-2.5 py-1 text-[11px] font-bold rounded transition-all duration-150 ${
+                                timeframe === tf.value
+                                    ? 'bg-blue-600 text-white shadow shadow-blue-900/60'
+                                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                            }`}
+                        >
+                            {tf.label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* HUD Legend */}
+                <div className="flex flex-wrap gap-3 sm:gap-4 text-xs font-mono bg-slate-950/85 backdrop-blur border border-slate-800/80 px-4 py-2 rounded-lg text-slate-400 select-none shadow-lg">
+                    {hudData ? (
+                        <>
+                            <div>O <span className="text-white ml-0.5">{hudData.open.toFixed(5)}</span></div>
+                            <div>H <span className="text-white ml-0.5">{hudData.high.toFixed(5)}</span></div>
+                            <div>L <span className="text-white ml-0.5">{hudData.low.toFixed(5)}</span></div>
+                            <div>C <span className="text-white ml-0.5">{hudData.close.toFixed(5)}</span></div>
+                            <div>V <span className="text-white ml-0.5">{hudData.volume.toLocaleString()}</span></div>
+                            {hudData.sma && (
+                                <div className="text-amber-400 font-semibold">
+                                    SMA(20) <span className="ml-0.5">{hudData.sma.toFixed(5)}</span>
+                                </div>
+                            )}
+                            <div className={hudData.change >= 0 ? "text-emerald-400 font-semibold" : "text-rose-500 font-semibold"}>
+                                {hudData.change >= 0 ? '+' : ''}{hudData.change.toFixed(5)} ({hudData.changePercent.toFixed(2)}%)
                             </div>
-                        )}
-                        <div className={hudData.change >= 0 ? "text-emerald-400 font-semibold" : "text-rose-500 font-semibold"}>
-                            {hudData.change >= 0 ? '+' : ''}{hudData.change.toFixed(5)} ({hudData.changePercent.toFixed(2)}%)
-                        </div>
-                    </>
-                ) : (
-                    <span className="text-slate-500">Hover over chart to view tick data</span>
-                )}
+                        </>
+                    ) : (
+                        <span className="text-slate-500">Hover over chart to view tick data</span>
+                    )}
+                </div>
             </div>
 
             {/* TradingView Lightweight Charts target container */}

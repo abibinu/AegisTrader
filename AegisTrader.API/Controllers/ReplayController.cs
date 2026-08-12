@@ -47,9 +47,9 @@ public class ReplayController : ControllerBase
     }
 
     [HttpGet("{sessionId}/candles")]
-    public async Task<IActionResult> GetCandles(Guid sessionId)
+    public async Task<IActionResult> GetCandles(Guid sessionId, [FromQuery] int timeframe = 1)
     {
-        var candles = await _replayService.GetVisibleCandles(sessionId);
+        var candles = await _replayService.GetVisibleCandles(sessionId, timeframe);
         return Ok(candles);
     }
 

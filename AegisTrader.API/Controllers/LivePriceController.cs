@@ -12,33 +12,45 @@ public class LivePriceController : ControllerBase
 {
     private readonly LivePriceCache _priceCache;
     private readonly AegisDbContext _context;
+    private readonly AggregationService _aggregation;
 
-    public LivePriceController(LivePriceCache priceCache, AegisDbContext context)
+    public LivePriceController(LivePriceCache priceCache, AegisDbContext context, AggregationService aggregation)
     {
-        _priceCache = priceCache;
-        _context = context;
+        _priceCache  = priceCache;
+        _context     = context;
+        _aggregation = aggregation;
     }
 
     /// <summary>
-    /// Returns the last N historical candles as a baseline context for the Live Sandbox chart.
-    /// GET /api/LivePrice/history?symbol=EURUSD&count=500
+    /// Returns the last N aggregated candles as a baseline context for the Live Sandbox chart.
+    /// GET /api/LivePrice/history?symbol=EURUSD&count=500&timeframe=1
+    /// timeframe: 1 (1m), 5 (5m), 15 (15m), 60 (1H), 240 (4H)
     /// </summary>
     [AllowAnonymous]
     [HttpGet("history")]
     public async Task<IActionResult> GetLiveHistory(
         [FromQuery] string symbol = "EURUSD",
-        [FromQuery] int count = 500)
+        [FromQuery] int count = 500,
+        [FromQuery] int timeframe = 1)
     {
-        // Clamp to a safe range: minimum 50, maximum 2000 candles
+        // Clamp aggregated output bars to a safe range: 50–2000
         count = Math.Max(50, Math.Min(count, 2000));
+        // Ensure timeframe is a valid value
+        timeframe = timeframe <= 1 ? 1 : timeframe;
+
+        // Fetch enough raw 1m candles to produce ~count aggregated bars
+        int rawCount = Math.Min(count * timeframe, 10000);
 
         var candles = await _context.Candlesticks
             .Where(c => c.Symbol == symbol)
             .OrderByDescending(c => c.Timestamp)
-            .Take(count)
+            .Take(rawCount)
             .ToListAsync();
 
-        return Ok(candles.OrderBy(c => c.Timestamp).ToList());
+        var sorted = candles.OrderBy(c => c.Timestamp).ToList();
+        var aggregated = _aggregation.AggregateCandles(sorted, timeframe);
+
+        return Ok(aggregated);
     }
 
     /// <summary>

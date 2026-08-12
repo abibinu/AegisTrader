@@ -129,17 +129,27 @@ const ReplayPage = () => {
   const [trades, setTrades] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
+  const [timeframe, setTimeframe] = useState(1);
+
   // ── API Calls ────────────────────────────────────────────────────────────────
 
-  const fetchCandles = useCallback(async (sessionId) => {
+  const fetchCandles = useCallback(async (sessionId, tf = 1) => {
     try {
-      const res = await client.get(`/Replay/${sessionId}/candles`);
+      const res = await client.get(`/Replay/${sessionId}/candles?timeframe=${tf}`);
       setCandles(res.data);
     } catch (err) {
       console.error("Failed to fetch candles:", err);
       setError("Could not load candles. Is the API running?");
     }
   }, []);
+
+  const handleTimeframeChange = useCallback((tf) => {
+    setTimeframe(tf);
+    if (session) {
+      fetchCandles(session.id, tf);
+    }
+  }, [session, fetchCandles]);
 
   const fetchTrades = useCallback(async (sessionId) => {
     try {
@@ -510,7 +520,7 @@ const ReplayPage = () => {
           {/* Chart */}
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
-              <TradingChart data={candles} trades={trades} />
+              <TradingChart data={candles} trades={trades} timeframe={timeframe} onTimeframeChange={handleTimeframeChange} />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center">
