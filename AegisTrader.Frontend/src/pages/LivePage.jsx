@@ -144,22 +144,22 @@ const LivePage = () => {
     checkDb();
   }, []);
 
-  // Fetch initial candles baseline — always request 1m candles for full granularity,
-  // then client-side aggregateCandles formats it for any selected timeframe.
+  // Fetch baseline history from API for the selected timeframe (returns 500 aggregated bars)
   const fetchBaselineHistory = useCallback(async (tf = 1) => {
     try {
-      // Request enough 1m candles to produce ~500 bars for the target timeframe (up to 120,000 max)
-      const rawCount = Math.min(500 * Math.max(tf, 1), 120000);
-      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=${rawCount}&timeframe=1`);
+      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=500&timeframe=${tf}`);
       const history = res.data;
       if (history && history.length > 0) {
-        // Calculate timestamp offset rounded to EXACT integer minute boundaries (no sub-minute shift drift)
+        // Calculate timestamp offset (integer minutes) so history ends cleanly 1 timeframe-bucket before current time
         const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
-        const currentMinuteStart = Math.floor(Date.now() / 60000) * 60000;
-        const targetHistoricalEndTime = currentMinuteStart - 60000;
+        const currentMs = Date.now();
+        const tfMs = tf * 60000;
+        const currentBucketStart = Math.floor(currentMs / tfMs) * tfMs;
+        const targetHistoricalEndTime = currentBucketStart - tfMs;
         const offsetMs = Math.floor((targetHistoricalEndTime - latestCandleTime) / 60000) * 60000;
 
-        const shiftedHistory = history.map(c => {
+        // Shift timestamps cleanly
+        let shiftedHistory = history.map(c => {
           const originalTime = new Date(c.timestamp ?? c.Timestamp).getTime();
           const newTimeMs = Math.floor((originalTime + offsetMs) / 60000) * 60000;
           const newTimeIso = new Date(newTimeMs).toISOString();
@@ -167,23 +167,49 @@ const LivePage = () => {
             ...c,
             timestamp: newTimeIso,
             Timestamp: newTimeIso,
+            open: Number(c.open ?? c.Open),
+            Open: Number(c.open ?? c.Open),
+            high: Number(c.high ?? c.High),
+            High: Number(c.high ?? c.High),
+            low: Number(c.low ?? c.Low),
+            Low: Number(c.low ?? c.Low),
+            close: Number(c.close ?? c.Close),
+            Close: Number(c.close ?? c.Close),
+            volume: Number(c.volume ?? c.Volume ?? 0),
+            Volume: Number(c.volume ?? c.Volume ?? 0),
             isLive: false // Mark baseline candles so live ticks never mutate them
           };
         });
+
+        // Price baseline normalization:
+        // If currentTick is available, shift historical price levels vertically so the last historical close
+        // seamlessly matches currentTick.bid. This completely eliminates the 150-pip gap spike candle!
+        const latestClose = shiftedHistory[shiftedHistory.length - 1].close;
+        const targetPrice = currentTick ? currentTick.bid : null;
+        if (targetPrice && Math.abs(targetPrice - latestClose) > 0.00050) {
+          const pDiff = targetPrice - latestClose;
+          shiftedHistory = shiftedHistory.map(c => ({
+            ...c,
+            open: c.open + pDiff,   Open: c.Open + pDiff,
+            high: c.high + pDiff,   High: c.High + pDiff,
+            low: c.low + pDiff,     Low: c.Low + pDiff,
+            close: c.close + pDiff, Close: c.Close + pDiff,
+          }));
+        }
+
         setCandles(shiftedHistory);
       }
     } catch (err) {
       console.error("Failed to load historical candles:", err);
     }
-  }, []);
+  }, [currentTick]);
 
   useEffect(() => {
-    fetchBaselineHistory(1);
-  }, [fetchBaselineHistory]);
+    fetchBaselineHistory(timeframe);
+  }, [fetchBaselineHistory, timeframe]);
 
   const handleLiveTimeframeChange = useCallback((tf) => {
     setTimeframe(tf);
-    // Re-fetch baseline history with enough 1m candles to fill 500 bars at the new timeframe
     fetchBaselineHistory(tf);
   }, [fetchBaselineHistory]);
 
@@ -215,48 +241,74 @@ const LivePage = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Roll ticks into candles and check trade triggers
+  // Roll ticks into chart candles for the active timeframe and check trade triggers
   useEffect(() => {
     if (!currentTick) return;
 
     // 1. Roll ticks into chart candles
     setCandles(prevCandles => {
       if (prevCandles.length === 0) return [];
-      
+
       const newCandles = [...prevCandles];
       const lastCandle = { ...newCandles[newCandles.length - 1] };
-      
-      const lastTime = new Date(lastCandle.timestamp ?? lastCandle.Timestamp);
-      const tickTime = new Date(currentTick.timestamp);
-      
-      // Compare minute boundaries
-      const isSameMinute = 
-        lastTime.getUTCFullYear() === tickTime.getUTCFullYear() &&
-        lastTime.getUTCMonth() === tickTime.getUTCMonth() &&
-        lastTime.getUTCDate() === tickTime.getUTCDate() &&
-        lastTime.getUTCHours() === tickTime.getUTCHours() &&
-        lastTime.getUTCMinutes() === tickTime.getUTCMinutes();
 
-      const price = currentTick.bid; // use bid as close reference
+      const lastTimeMs = new Date(lastCandle.timestamp ?? lastCandle.Timestamp).getTime();
+      const tickTimeMs = new Date(currentTick.timestamp).getTime();
 
-      if (isSameMinute && lastCandle.isLive) {
-        // Update the LIVE candle only (never mutate historical candles)
+      const tfMs = timeframe * 60000;
+      const lastBucket = Math.floor(lastTimeMs / tfMs);
+      const tickBucket = Math.floor(tickTimeMs / tfMs);
+
+      const isSameBucket = lastBucket === tickBucket;
+      const price = currentTick.bid;
+
+      // If price baseline was not yet normalized (first tick after baseline load), normalize baseline candles now
+      if (!lastCandle.isLive && Math.abs(price - lastCandle.close) > 0.00050) {
+        const pDiff = price - lastCandle.close;
+        const normalized = newCandles.map(c => ({
+          ...c,
+          open: c.open + pDiff,   Open: c.Open + pDiff,
+          high: c.high + pDiff,   High: c.High + pDiff,
+          low: c.low + pDiff,     Low: c.Low + pDiff,
+          close: c.close + pDiff, Close: c.Close + pDiff,
+        }));
+        // Re-read last candle after price normalization
+        const normLast = { ...normalized[normalized.length - 1] };
+        const openP = normLast.close;
+        const highP = Math.max(openP, price);
+        const lowP  = Math.min(openP, price);
+
+        const newCandle = {
+          Timestamp: currentTick.timestamp,
+          timestamp: currentTick.timestamp,
+          Open: openP, open: openP,
+          High: highP, high: highP,
+          Low: lowP,   low: lowP,
+          Close: price, close: price,
+          Volume: 0,  volume: 0,
+          isLive: true
+        };
+        normalized.push(newCandle);
+        return normalized;
+      }
+
+      if (isSameBucket && lastCandle.isLive) {
+        // Update current active live candle
         lastCandle.Close = price;
         lastCandle.close = price;
-        if (price > lastCandle.High) {
+        if (price > lastCandle.high) {
           lastCandle.High = price;
           lastCandle.high = price;
         }
-        if (price < lastCandle.Low) {
+        if (price < lastCandle.low) {
           lastCandle.Low = price;
           lastCandle.low = price;
         }
         newCandles[newCandles.length - 1] = lastCandle;
-      } else if (!isSameMinute || !lastCandle.isLive) {
-        // Create a new live candle — open price bridged to the previous close
+      } else if (!isSameBucket || !lastCandle.isLive) {
+        // Create new live candle for active timeframe
         const prevClose = Number(lastCandle.close ?? lastCandle.Close ?? price);
-        // If the gap to the previous close is ≤ 5 pips, connect seamlessly; otherwise gap-open
-        const openPrice = Math.abs(price - prevClose) < 0.00050 ? prevClose : price;
+        const openPrice = prevClose;
         const highPrice = Math.max(openPrice, price);
         const lowPrice  = Math.min(openPrice, price);
 
@@ -267,11 +319,10 @@ const LivePage = () => {
           High: highPrice, high: highPrice,
           Low: lowPrice,   low: lowPrice,
           Close: price,    close: price,
-          Volume: 0, volume: 0,
-          isLive: true    // marker: this candle was created by the live tick engine
+          Volume: 0,       volume: 0,
+          isLive: true
         };
         newCandles.push(newCandle);
-        // Keep chart clean — trim oldest candles beyond 600 to maintain performance
         if (newCandles.length > 600) {
           newCandles.shift();
         }
@@ -590,7 +641,7 @@ const LivePage = () => {
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
               <TradingChart
-                data={aggregateCandles(candles, timeframe)}
+                data={candles}
                 trades={openTrades.concat(tradeHistory)}
                 timeframe={timeframe}
                 onTimeframeChange={handleLiveTimeframeChange}
