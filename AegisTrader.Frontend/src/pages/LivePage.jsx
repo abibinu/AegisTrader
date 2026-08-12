@@ -70,22 +70,36 @@ const LivePage = () => {
     for (const c of oneMinuteCandles) {
       const ts = new Date(c.timestamp ?? c.Timestamp).getTime();
       const epochMin = Math.floor(ts / 60000);
-      const bucket = Math.floor(epochMin / tf) * tf * 60000; // bucket start in ms
-      if (!groups.has(bucket)) {
-        groups.set(bucket, { ...c, timestamp: new Date(bucket).toISOString(), Timestamp: new Date(bucket).toISOString() });
+      const bucketMin = Math.floor(epochMin / tf) * tf;
+      const bucketMs = bucketMin * 60000;
+      const bucketIso = new Date(bucketMs).toISOString();
+
+      const openVal  = Number(c.open  ?? c.Open  ?? 0);
+      const highVal  = Number(c.high  ?? c.High  ?? 0);
+      const lowVal   = Number(c.low   ?? c.Low   ?? 0);
+      const closeVal = Number(c.close ?? c.Close ?? 0);
+      const volVal   = Number(c.volume ?? c.Volume ?? 0);
+
+      if (!groups.has(bucketMs)) {
+        groups.set(bucketMs, {
+          ...c,
+          timestamp: bucketIso,
+          Timestamp: bucketIso,
+          open: openVal,   Open: openVal,
+          high: highVal,   High: highVal,
+          low: lowVal,     Low: lowVal,
+          close: closeVal, Close: closeVal,
+          volume: volVal,  Volume: volVal,
+        });
       } else {
-        const existing = groups.get(bucket);
-        const curHigh = Number(c.high ?? c.High);
-        const curLow  = Number(c.low  ?? c.Low);
-        const existHigh = Number(existing.high ?? existing.High);
-        const existLow  = Number(existing.low  ?? existing.Low);
-        existing.high  = curHigh > existHigh ? curHigh : existHigh;
+        const existing = groups.get(bucketMs);
+        existing.high  = Math.max(existing.high, highVal);
         existing.High  = existing.high;
-        existing.low   = curLow < existLow ? curLow : existLow;
+        existing.low   = Math.min(existing.low, lowVal);
         existing.Low   = existing.low;
-        existing.close = c.close ?? c.Close;
-        existing.Close = existing.close;
-        existing.volume = (Number(existing.volume ?? existing.Volume ?? 0)) + Number(c.volume ?? c.Volume ?? 0);
+        existing.close = closeVal;
+        existing.Close = closeVal;
+        existing.volume = existing.volume + volVal;
         existing.Volume = existing.volume;
       }
     }
@@ -130,24 +144,31 @@ const LivePage = () => {
     checkDb();
   }, []);
 
-  // Fetch initial candles baseline — on timeframe change, re-fetch so the baseline aligns with the new TF
+  // Fetch initial candles baseline — always request 1m candles for full granularity,
+  // then client-side aggregateCandles formats it for any selected timeframe.
   const fetchBaselineHistory = useCallback(async (tf = 1) => {
     try {
-      // Fetch enough 1m candles to cover 500 aggregated bars
-      const rawCount = Math.min(500 * Math.max(tf, 1), 2000);
-      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=${rawCount}`);
+      // Request enough 1m candles to produce ~500 bars for the target timeframe (up to 120,000 max)
+      const rawCount = Math.min(500 * Math.max(tf, 1), 120000);
+      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=${rawCount}&timeframe=1`);
       const history = res.data;
       if (history && history.length > 0) {
-        // Align history end to 1 minute before current time
+        // Calculate timestamp offset rounded to EXACT integer minute boundaries (no sub-minute shift drift)
         const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
-        const currentTime = Date.now();
-        const targetHistoricalEndTime = currentTime - 60000;
-        const offsetMs = targetHistoricalEndTime - latestCandleTime;
+        const currentMinuteStart = Math.floor(Date.now() / 60000) * 60000;
+        const targetHistoricalEndTime = currentMinuteStart - 60000;
+        const offsetMs = Math.floor((targetHistoricalEndTime - latestCandleTime) / 60000) * 60000;
 
         const shiftedHistory = history.map(c => {
           const originalTime = new Date(c.timestamp ?? c.Timestamp).getTime();
-          const newTime = new Date(originalTime + offsetMs).toISOString();
-          return { ...c, timestamp: newTime, Timestamp: newTime };
+          const newTimeMs = Math.floor((originalTime + offsetMs) / 60000) * 60000;
+          const newTimeIso = new Date(newTimeMs).toISOString();
+          return {
+            ...c,
+            timestamp: newTimeIso,
+            Timestamp: newTimeIso,
+            isLive: false // Mark baseline candles so live ticks never mutate them
+          };
         });
         setCandles(shiftedHistory);
       }
@@ -162,7 +183,7 @@ const LivePage = () => {
 
   const handleLiveTimeframeChange = useCallback((tf) => {
     setTimeframe(tf);
-    // Re-fetch enough 1m candles to fill the viewport at the new timeframe
+    // Re-fetch baseline history with enough 1m candles to fill 500 bars at the new timeframe
     fetchBaselineHistory(tf);
   }, [fetchBaselineHistory]);
 
@@ -218,8 +239,8 @@ const LivePage = () => {
 
       const price = currentTick.bid; // use bid as close reference
 
-      if (isSameMinute) {
-        // Update current candle
+      if (isSameMinute && lastCandle.isLive) {
+        // Update the LIVE candle only (never mutate historical candles)
         lastCandle.Close = price;
         lastCandle.close = price;
         if (price > lastCandle.High) {
@@ -231,10 +252,10 @@ const LivePage = () => {
           lastCandle.low = price;
         }
         newCandles[newCandles.length - 1] = lastCandle;
-      } else {
-        // Create new candle object starting at current tick
-        const prevClose = Number(lastCandle.Close ?? lastCandle.close ?? price);
-        // Connect open to previous close if within normal tick range for seamless candle continuity
+      } else if (!isSameMinute || !lastCandle.isLive) {
+        // Create a new live candle — open price bridged to the previous close
+        const prevClose = Number(lastCandle.close ?? lastCandle.Close ?? price);
+        // If the gap to the previous close is ≤ 5 pips, connect seamlessly; otherwise gap-open
         const openPrice = Math.abs(price - prevClose) < 0.00050 ? prevClose : price;
         const highPrice = Math.max(openPrice, price);
         const lowPrice  = Math.min(openPrice, price);
@@ -246,7 +267,8 @@ const LivePage = () => {
           High: highPrice, high: highPrice,
           Low: lowPrice,   low: lowPrice,
           Close: price,    close: price,
-          Volume: 0, volume: 0
+          Volume: 0, volume: 0,
+          isLive: true    // marker: this candle was created by the live tick engine
         };
         newCandles.push(newCandle);
         // Keep chart clean — trim oldest candles beyond 600 to maintain performance

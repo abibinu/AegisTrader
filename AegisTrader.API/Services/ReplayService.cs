@@ -1,4 +1,4 @@
-using AegisTrader.API.Data;
+ï»¿using AegisTrader.API.Data;
 using AegisTrader.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,7 +36,7 @@ public class ReplayService
         return session;
     }
 
-    // 1b. Fetch an existing session by ID (used for frontend session restoration)
+    // 1b. Fetch an existing session by ID
     public async Task<TradingSession?> GetSession(Guid sessionId)
     {
         return await _context.TradingSessions.FindAsync(sessionId);
@@ -44,14 +44,14 @@ public class ReplayService
 
     // 2. Timestamp Visibility Barrier with multi-timeframe support.
     //    timeframeMinutes: 1 (default), 5, 15, 60, or 240.
-    //    Fetch (500 * timeframeMinutes) raw 1m candles, then aggregate to produce ~500 bars.
+    //    Fetch (500 * timeframeMinutes) raw 1m candles then aggregate to produce ~500 bars.
+    //    Cap at 150,000 to support 4H (500 bars x 240 min = 120,000 raw candles needed).
     public async Task<List<CandlestickAggDto>> GetVisibleCandles(Guid sessionId, int timeframeMinutes = 1)
     {
         var session = await _context.TradingSessions.FindAsync(sessionId);
         if (session == null) throw new Exception("Session not found");
 
-        // Clamp raw fetch count to a sane maximum
-        int rawCount = Math.Min(500 * Math.Max(timeframeMinutes, 1), 5000);
+        int rawCount = Math.Min(500 * Math.Max(timeframeMinutes, 1), 150_000);
 
         var candles = await _context.Candlesticks
             .Where(c => c.Symbol == session.Symbol && c.Timestamp <= session.CurrentReplayTimestamp)
@@ -63,7 +63,7 @@ public class ReplayService
         return _aggregation.AggregateCandles(sorted, timeframeMinutes);
     }
 
-    // 3. Advance the replay clock — checks every 1m candle for TP/SL hits regardless of step size
+    // 3. Advance the replay clock - checks every 1m candle for TP/SL hits regardless of step size
     public async Task<StepResult> StepForward(Guid sessionId, int minutesToStep)
     {
         var session = await _context.TradingSessions.FindAsync(sessionId);

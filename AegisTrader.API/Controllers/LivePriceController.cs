@@ -33,13 +33,14 @@ public class LivePriceController : ControllerBase
         [FromQuery] int count = 500,
         [FromQuery] int timeframe = 1)
     {
-        // Clamp aggregated output bars to a safe range: 50–2000
-        count = Math.Max(50, Math.Min(count, 2000));
+        // Clamp aggregated output bars to a safe range: 50–500
+        count = Math.Max(50, Math.Min(count, 500));
         // Ensure timeframe is a valid value
         timeframe = timeframe <= 1 ? 1 : timeframe;
 
-        // Fetch enough raw 1m candles to produce ~count aggregated bars
-        int rawCount = Math.Min(count * timeframe, 10000);
+        // Fetch enough raw 1m candles to produce ~count aggregated bars.
+        // Cap at 150,000 to support 4H (500 bars × 240 min = 120,000 raw candles).
+        int rawCount = Math.Min(count * timeframe, 150_000);
 
         var candles = await _context.Candlesticks
             .Where(c => c.Symbol == symbol)

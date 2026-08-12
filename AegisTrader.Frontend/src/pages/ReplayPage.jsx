@@ -186,7 +186,7 @@ const ReplayPage = () => {
         const res = await client.get(`/Replay/${savedSessionId}`);
         if (res.data) {
           setSession(res.data);
-          await fetchCandles(savedSessionId);
+          await fetchCandles(savedSessionId, timeframe);
           await fetchTrades(savedSessionId);
         }
       } catch {
@@ -216,9 +216,9 @@ const ReplayPage = () => {
         `/Replay/start?symbol=EURUSD&startTime=${startTime}`
       );
       setSession(res.data);
-      // Persist sessionId so it survives navigation (analytics → back) and page refresh
+      // Persist sessionId so it survives navigation (analytics -> back) and page refresh
       localStorage.setItem(SESSION_KEY, res.data.id);
-      await fetchCandles(res.data.id);
+      await fetchCandles(res.data.id, timeframe);
       await fetchTrades(res.data.id);
     } catch (err) {
       setError("Failed to start session. Make sure the API is running on port 5273.");
@@ -250,7 +250,7 @@ const ReplayPage = () => {
         currentReplayTimestamp: res.data.currentTime,
         currentBalance: res.data.currentBalance
       }));
-      await fetchCandles(session.id);
+      await fetchCandles(session.id, timeframe);
       await fetchTrades(session.id);
     } catch (err) {
       console.error("Step failed:", err);
