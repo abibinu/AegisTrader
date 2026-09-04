@@ -2,7 +2,6 @@
 
 > **Academic Project & Technical Reference Documentation**  
 > **Lead Engineer:** Abi Binu · MCA Batch 2025–2027  
-> **Repository:** [AegisTrader Workspace](file:///c:/Users/abiko/OneDrive/Desktop/AegisTrader)
 
 ---
 
