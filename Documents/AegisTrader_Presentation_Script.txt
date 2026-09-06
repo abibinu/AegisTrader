@@ -1,0 +1,121 @@
+================================================================================
+           AEGISTRADER — PROJECT EVALUATION PRESENTATION SCRIPT
+           Lead Presenter: Abi Binu (MCA Batch 2025–2027)
+           Platform: AegisTrader (Forex Backtesting & Live Simulation)
+================================================================================
+
+--------------------------------------------------------------------------------
+SECTION 1: THE PROBLEM STATEMENT (1 Minute)
+--------------------------------------------------------------------------------
+"Respected evaluators, good morning/afternoon.
+
+In quantitative financial trading—specifically frameworks like Inner Circle Trader (ICT) 
+and Smart Money Concepts (SMC)—traders rely heavily on backtesting historical data 
+and forward-testing strategies before risking real capital.
+
+However, existing retail backtesting platforms suffer from 4 critical technical flaws:
+
+1. LOOKAHEAD BIAS: Legacy simulators lack an absolute timestamp barrier, allowing future 
+   candlesticks to leak into the chart view during backtesting, invalidating test results.
+2. FLAWED EXECUTION MODELING: When market volatility causes a single bar's range to breach 
+   BOTH Take Profit (TP) and Stop Loss (SL) levels, existing systems optimistically register 
+   a winning trade rather than simulating realistic adverse slippage.
+3. DATABASE BLOAT: Generating higher timeframes (5m, 15m, 1H, 4H) traditionally requires 
+   maintaining duplicate, pre-calculated database tables for every interval, causing massive 
+   storage bloat over millions of rows.
+4. HIGH COST & PROPRIETARY FEEDS: Commercial live price APIs require expensive subscription 
+   fees, making real-time testing inaccessible for retail developers."
+
+
+--------------------------------------------------------------------------------
+SECTION 2: THE PROPOSED SOLUTION — AEGISTRADER (1 Minute)
+--------------------------------------------------------------------------------
+"To solve these challenges, I built AEGISTRADER — a full-stack, enterprise-grade trading 
+simulation platform engineered for zero-risk strategy validation.
+
+Key Architectural Solutions:
+• Deterministic Replay Engine: Enforces a strict database query boundary 
+  (Timestamp <= CurrentReplayTimestamp) to mathematically guarantee zero-lookahead bias.
+• Dynamic Server-Side MTF Aggregation: Uses Unix Epoch integer division to generate 
+  5m, 15m, 1H, and 4H charts on-the-fly directly from 1-minute historical data without 
+  duplicate tables.
+• Defensive Overlap Constraint: Implements a pessimistic execution model—if a single 
+  bar hits both SL and TP, the engine forces a Stop Loss closure to mirror real slippage.
+• Zero-Cost Real-Time MT5 Bridge: Integrates a local Python bridge using the MetaTrader 5 
+  SDK to stream live 500ms tick prices from a Vantage Markets terminal into the API."
+
+
+--------------------------------------------------------------------------------
+SECTION 3: TECHNICAL ARCHITECTURE & STACK (1.5 Minutes)
+--------------------------------------------------------------------------------
+"AegisTrader follows a clean Controller-Service-Repository architecture split across 4 tiers:
+
+1. FRONTEND LAYER: Built with React 19, Vite 8, Tailwind CSS v4, and TradingView 
+   Lightweight Charts v5 for responsive visual canvas rendering.
+2. WEB API LAYER: ASP.NET Core 10 Web API providing RESTful JSON endpoints protected by 
+   JWT Bearer authentication and BCrypt password hashing.
+3. BUSINESS LOGIC SERVICES:
+   - ReplayService: Manages the anti-lookahead historical clock.
+   - AggregationService: Performs server-side integer-division MTF candle grouping.
+   - TradeService: Handles 5-decimal Forex pip math, dynamic floating PnL, and SL/TP hits.
+   - AnalyticsService: Calculates quantitative metrics over closed trades.
+   - LivePriceCache: In-memory thread-safe tick buffer updating at 500ms intervals.
+4. PERSISTENCE & DATA FEED: PostgreSQL 16 database with EF Core 10 migrations. Financial 
+   decimals mapped to decimal(18,6) with composite B-Tree indexing on (Symbol, Timestamp) 
+   to query over 1,000,000 Dukascopy historical records in sub-milliseconds."
+
+
+--------------------------------------------------------------------------------
+SECTION 4: STEP-BY-STEP LIVE MVP DEMONSTRATION SCRIPT (3 Minutes)
+--------------------------------------------------------------------------------
+[ACTION: Open Browser at http://localhost:5173]
+
+1. AUTHENTICATION & SECURITY DEMO:
+   "First, I log into the platform. AegisTrader uses secure BCrypt password verification 
+   and returns a stateless JWT Bearer token, which is stored in state and attached to 
+   every HTTP request via Axios interceptors."
+
+2. REAL-TIME LIVE SANDBOX & MT5 BRIDGE DEMO:
+   "Next, we land on the LIVE SANDBOX. Notice the top header updating every 500ms. 
+   This live price feed is streamed directly from MetaTrader 5 via our local Python 
+   bridge script running in the background. 
+   
+   Let's execute a LIVE MARKET BUY ORDER with 1.0 Lot Size, setting custom Stop Loss 
+   and Take Profit levels. 
+   Notice the horizontal dashed order lines and markers anchored to the chart. 
+   As live ticks arrive, the engine dynamically calculates unrealized floating PnL 
+   in real time."
+
+3. HISTORICAL REPLAY & MULTI-TIMEFRAME DEMO:
+   "Now, let's switch to HISTORICAL REPLAY mode. Here, the engine enforces our timestamp 
+   visibility barrier—the chart cannot see any future candles beyond our replay clock.
+   
+   I can switch timeframes from 1-minute to 15-minute or 1-Hour. The backend server 
+   aggregates millions of 1m records on-the-fly into 15m bars using integer epoch division.
+   
+   When I click 'Step Forward (+15m)', the replay clock advances, new candles render, 
+   and any open orders are evaluated against high/low range boundaries."
+
+4. QUANTITATIVE ANALYTICS DASHBOARD DEMO:
+   "Finally, let's view the ANALYTICS DASHBOARD. The AnalyticsService scans closed trade 
+   ledgers to calculate institutional performance metrics:
+   - WIN RATE %: Percentage of winning trades.
+   - PROFIT FACTOR: Ratio of Gross Profits to Gross Losses.
+   - MAX DRAWDOWN %: Worst peak-to-trough capital decline across the equity curve.
+   - NET REALIZED PnL ($): Net dollar profit/loss."
+
+
+--------------------------------------------------------------------------------
+SECTION 5: CONCLUSION & FUTURE ROADMAP (0.5 Minutes)
+--------------------------------------------------------------------------------
+"In summary, AegisTrader delivers a robust, zero-risk simulation environment 
+combining deterministic backtesting, real-time live trading, and quantitative analytics.
+
+Future Expansion Roadmap:
+• Phase 3: Automated PineScript / C# Strategy Scripting Engine.
+• Phase 4: AI-assisted Trade Journaling for automatic Fair Value Gap (FVG) and 
+  Order Block pattern detection.
+• Phase 5: Multi-Asset expansion to Gold (XAUUSD) and Crypto.
+
+Thank you for your time. I am now open to any technical questions."
+================================================================================
