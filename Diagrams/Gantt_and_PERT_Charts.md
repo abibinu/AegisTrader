@@ -42,53 +42,65 @@ gantt
 
 ---
 
-## 2. PERT Chart (Program Evaluation and Review Technique)
+## 2. PERT Chart (Multi-Branch Parallel Work Stream Layout)
 
 ```mermaid
-flowchart LR
-    %% Start Event Node
-    Start(("Start Project<br/>Jun 08"))
+flowchart TD
+    %% Milestone Start Node
+    Start(("Start Project<br/>June 08"))
 
-    %% Task Activity Nodes (Task ID, Name, Expected Duration Te)
-    T1["T1: Requirements & SRS<br/>Te = 14 Days"]
-    T2["T2: Architecture & DB Design<br/>Te = 14 Days"]
-    T3["T3: JWT Auth & API Setup<br/>Te = 7 Days"]
-    T4["T4: Historical Replay Engine<br/>Te = 7 Days"]
-    T5["T5: Server-Side MTF Aggregation<br/>Te = 7 Days"]
-    T6["T6: Python MT5 Live Price Bridge<br/>Te = 7 Days"]
-    T7["T7: Trade Execution & Overlap Engine<br/>Te = 7 Days"]
-    T8["T8: Quantitative Analytics Service<br/>Te = 7 Days"]
-    T9["T9: React 19 & Tailwind UI<br/>Te = 7 Days"]
-    T10["T10: TradingView Charts Canvas<br/>Te = 7 Days"]
-    T11["T11: Integration Testing<br/>Te = 4 Days"]
-    T12["T12: Documentation & MVP Release<br/>Te = 3 Days"]
+    %% Initial Core Requirements
+    T1["T1: Requirements & SRS Analysis<br/>(Jun 08 - Jun 21 | 14 Days)"]
+    T2["T2: System Architecture & DB Design<br/>(Jun 22 - Jul 05 | 14 Days)"]
 
-    %% Finish Milestone Event Node
-    Finish(("MVP Release & Evaluation<br/>Sep 06"))
+    Start --> T1 --> T2
 
-    %% Dependency Connections
-    Start --> T1
-    T1 --> T2
+    %% Branching Parallel Work Streams
+    subgraph StreamA ["Stream A: Core Backend & Replay Engine"]
+        T3["T3: JWT Auth & API Scaffold<br/>(Jul 06 - Jul 12 | 7 Days)"]
+        T4["T4: Replay Engine & Barrier<br/>(Jul 13 - Jul 19 | 7 Days)"]
+        T5["T5: Server MTF Aggregation<br/>(Jul 20 - Jul 26 | 7 Days)"]
+        T3 --> T4 --> T5
+    end
+
+    subgraph StreamB ["Stream B: Live Bridge & Execution Mechanics"]
+        T6["T6: Python MT5 Live Bridge<br/>(Jul 27 - Aug 02 | 7 Days)"]
+        T7["T7: Trade Execution & Overlap Engine<br/>(Aug 03 - Aug 09 | 7 Days)"]
+        T6 --> T7
+    end
+
+    subgraph StreamC ["Stream C: Frontend Client & Chart Canvas"]
+        T8["T8: React 19 & Tailwind UI<br/>(Aug 17 - Aug 23 | 7 Days)"]
+        T9["T9: TradingView Charts Canvas<br/>(Aug 24 - Aug 30 | 7 Days)"]
+        T8 --> T9
+    end
+
+    %% Parallel Branch Trigger Connections
     T2 --> T3
-    T3 --> T4
-    T4 --> T5
-    T5 --> T6
-    T6 --> T7
-    T7 --> T8
-    T8 --> T9
-    T9 --> T10
-    T10 --> T11
-    T11 --> T12
-    T12 --> Finish
+    T2 --> T6
+    T2 --> T8
 
-    %% Critical Path Highlighting
+    %% Convergence Node
+    T10["T10: Quantitative Analytics Engine<br/>(Aug 10 - Aug 16 | 7 Days)"]
+    T5 --> T10
+    T7 --> T10
+    T9 --> T10
+
+    %% Final Testing & Release
+    T11["T11: Integration & Performance Testing<br/>(Aug 31 - Sep 03 | 4 Days)"]
+    T12["T12: Documentation & Presentation Prep<br/>(Sep 04 - Sep 06 | 3 Days)"]
+    Finish(("MVP Release & Evaluation<br/>September 06"))
+
+    T10 --> T11 --> T12 --> Finish
+
+    %% Critical Path Highlighting (Red Border)
     style Start fill:#2563EB,stroke:#1D4ED8,color:#FFFFFF,stroke-width:2px;
     style Finish fill:#16A34A,stroke:#15803D,color:#FFFFFF,stroke-width:2px;
     style T1 stroke:#DC2626,stroke-width:3px;
     style T2 stroke:#DC2626,stroke-width:3px;
+    style T3 stroke:#DC2626,stroke-width:3px;
     style T4 stroke:#DC2626,stroke-width:3px;
     style T5 stroke:#DC2626,stroke-width:3px;
-    style T7 stroke:#DC2626,stroke-width:3px;
     style T10 stroke:#DC2626,stroke-width:3px;
     style T11 stroke:#DC2626,stroke-width:3px;
     style T12 stroke:#DC2626,stroke-width:3px;
