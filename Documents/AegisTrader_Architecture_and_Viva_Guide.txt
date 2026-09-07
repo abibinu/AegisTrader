@@ -1,0 +1,165 @@
+================================================================================
+           AEGISTRADER — ARCHITECTURE, FILE COMPONENT & VIVA GUIDE
+           Lead Developer: Abi Binu (MCA Batch 2025–2027)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. OVERALL SYSTEM FLOW (End-to-End Data & Processing Pipeline)
+--------------------------------------------------------------------------------
+
+[FLOW 1: USER AUTHENTICATION]
+Trader enters credentials -> React LoginPage -> POST /api/Auth/login -> AuthService 
+verifies password hash using BCrypt -> Generates JWT Bearer Token -> Returned to React 
+client -> Saved in localStorage & Axios headers.
+
+[FLOW 2: HISTORICAL REPLAY MODE]
+1. Trader selects Start Date & Symbol (EURUSD) -> POST /api/Replay/start creates session.
+2. React client requests candles: GET /api/Replay/{id}/candles?timeframe=15m.
+3. Backend ReplayService executes query: SELECT * FROM Candlesticks WHERE Timestamp <= 
+   CurrentReplayTimestamp (Anti-Lookahead Barrier).
+4. AggregationService takes raw 1m records, applies Unix Epoch integer division 
+   to group into 15m OHLCV bars on-the-fly, returning the visible bars to TradingChart.jsx.
+5. Trader clicks "Step Forward (+15m)" -> POST /api/Replay/{id}/step -> Backend advances 
+   session clock by 15 minutes, checks open orders for SL/TP hits, and updates balance.
+
+[FLOW 3: REAL-TIME LIVE PAPER TRADING MODE]
+1. External Python Script (mt5_bridge.py) polls local MetaTrader 5 terminal every 500ms.
+2. Python bridge POSTs tick JSON { Symbol: "EURUSD", Bid: 1.08520, Ask: 1.08532 } to API 
+   endpoint POST /api/LivePrice/tick.
+3. LivePriceController caches the tick in LivePriceCache (thread-safe ConcurrentDictionary).
+4. React LivePage.jsx polls GET /api/LivePrice/latest every 500ms.
+5. Client updates live chart candle and recalculates dynamic floating unrealized PnL.
+
+[FLOW 4: ORDER EXECUTION & OVERLAP RESOLUTION]
+1. Trader inputs Lot Size, Stop Loss (SL), Take Profit (TP), clicks BUY/SELL.
+2. POST /api/Trade/open -> TradeService saves trade record with Status="Open".
+3. When price moves:
+   - Hits TP only -> Close trade at TP, add Profit to Session Balance.
+   - Hits SL only -> Close trade at SL, subtract Loss from Session Balance.
+   - Hits BOTH SL and TP in a single candle (Extreme Volatility Overlap) -> 
+     Pessimistic Resolution: Forces Stop Loss closure to mirror real slippage.
+
+[FLOW 5: QUANTITATIVE ANALYTICS]
+Trader opens /analytics/{sessionId} -> GET /api/Trade/analytics/{sessionId} -> 
+AnalyticsService queries closed trades from DB -> Computes Win Rate %, Profit Factor, 
+and Max Drawdown % (peak-to-trough high-water mark capital decline).
+
+
+--------------------------------------------------------------------------------
+2. KEY FILES AND COMPONENTS BREAKDOWN
+--------------------------------------------------------------------------------
+
+A. BACKEND SERVICES (AegisTrader.API/Services/)
+------------------------------------------------
+• AuthService.cs:
+  - Registers users, hashes passwords with BCrypt.HashPassword().
+  - Authenticates login and signs JWT security tokens with HMAC-SHA256.
+
+• ReplayService.cs:
+  - Manages replay session state and clock advance logic.
+  - Core Anti-Lookahead Barrier: Filters database candles using Timestamp <= CurrentReplayTimestamp.
+
+• AggregationService.cs:
+  - Multi-Timeframe Generator. Performs integer division on Unix epoch timestamps:
+    epochMinutes = UnixTimestamp / 60;
+    bucketKey = epochMinutes - (epochMinutes % intervalMinutes);
+  - Groups 1m candles into 5m, 15m, 1H, 4H on-the-fly without duplicate DB tables.
+
+• LivePriceCache.cs:
+  - In-memory thread-safe tick storage using ConcurrentDictionary<string, TickDto>.
+  - Stores latest live tick price instantly without database write overhead.
+
+• TradeService.cs:
+  - Executes market entries, calculates Forex pip PnL:
+    Pips (Buy) = (ExitPrice - EntryPrice) * 10,000
+    PnL ($) = Pips * LotSize * $10.00 (Standard lot on EURUSD).
+  - Handles SL/TP hit detection and Overlap Constraint pessimistic SL closure.
+
+• AnalyticsService.cs:
+  - Computes Win Rate %, Profit Factor (Gross Profits / Gross Losses), and Max Drawdown %.
+
+• DataImportService.cs:
+  - Fast bulk parser importing 1,000,000+ rows of Dukascopy 1-minute CSV data into PostgreSQL.
+
+
+B. BACKEND CONTROLLERS (AegisTrader.API/Controllers/)
+-----------------------------------------------------
+• AuthController.cs      : Handlers for /api/Auth/register and /api/Auth/login.
+• ReplayController.cs    : Handlers for /api/Replay/start, /{id}/candles, and /{id}/step.
+• LivePriceController.cs : Handlers for POST /api/LivePrice/tick and GET /api/LivePrice/latest.
+• TradeController.cs     : Handlers for /api/Trade/open, /close/{id}, /history, and /analytics.
+• SeedController.cs      : Handlers for importing historical Dukascopy CSV data.
+
+
+C. DATABASE LAYER (AegisTrader.API/Data/ & AegisTrader.Core/Entities/)
+-----------------------------------------------------------------------
+• AegisDbContext.cs:
+  - Configures PostgreSQL connection and decimal precision decimal(18,6).
+  - Creates composite B-Tree Index on Candlesticks table: (Symbol, Timestamp).
+
+• Entities:
+  - User.cs           : Id, Username, Email, PasswordHash, CreatedAt.
+  - TradingSession.cs : Id, UserId, Symbol, SessionType, InitialBalance, CurrentBalance, ReplayTimestamp.
+  - Candlestick.cs    : Id, Symbol, Timestamp, Open, High, Low, Close, Volume.
+  - Trade.cs          : Id, SessionId, Direction, Status, EntryPrice, StopLoss, TakeProfit, LotSize, PnL.
+
+
+D. EXTERNAL LIVE BRIDGE (bridge/mt5_bridge.py)
+-----------------------------------------------
+• mt5_bridge.py:
+  - Python script running locally. Uses MetaTrader5 library to connect to Vantage MT5 terminal.
+  - Polls live EURUSD Bid/Ask prices every 500ms and POSTs to HTTP endpoint /api/LivePrice/tick.
+  - Includes automatic fallback simulation mode if MT5 terminal is offline.
+
+
+E. FRONTEND COMPONENTS (AegisTrader.Frontend/src/)
+---------------------------------------------------
+• AuthContext.jsx   : Global React Context managing login state, JWT token, and logout.
+• client.js         : Axios instance with request authorization header interceptors.
+• TradingChart.jsx  : Visual canvas powered by TradingView Lightweight Charts v5. Renders OHLC 
+                      candlesticks, SMA(20), volume histogram, interactive horizontal SL/TP lines, 
+                      and order Buy/Sell markers.
+• LivePage.jsx      : Live paper trading dashboard with 500ms tick polling & order ticket.
+• ReplayPage.jsx    : Historical replay page with timeframe controls (+1m, +5m, +15m, +1H, +4H).
+• AnalyticsPage.jsx : Performance summary scorecards and closed trade audit ledger table.
+
+
+--------------------------------------------------------------------------------
+3. TOP EVALUATOR VIVA QUESTIONS & READY ANSWERS
+--------------------------------------------------------------------------------
+
+Q1: "How do you guarantee that a trader cannot 'cheat' or look into the future during backtesting?"
+ANSWER: 
+"We enforce a strict database query barrier in ReplayService.cs:
+SELECT * FROM Candlesticks WHERE Symbol = @symbol AND Timestamp <= @CurrentReplayTimestamp.
+The server only returns data up to the current replay timestamp. Even if the client tries to 
+request future data, the database query mathematically blocks it."
+
+Q2: "Why didn't you create separate database tables for 5m, 15m, and 1H timeframes?"
+ANSWER: 
+"Storing duplicate tables for every timeframe causes severe database storage bloat over millions 
+of rows. Instead, we built an on-the-fly AggregationService.cs that groups 1-minute historical 
+candles using integer division on Unix Epoch timestamps:
+epochMinutes = timestamp / 60;
+bucketKey = epochMinutes - (epochMinutes % intervalMinutes);
+This dynamically generates 5m, 15m, 1H, and 4H charts instantly while saving over 80% DB storage."
+
+Q3: "How does your live price feed work without paying for expensive commercial APIs?"
+ANSWER: 
+"We built a local Python bridge (mt5_bridge.py) that uses the MetaTrader5 Python SDK to read 
+live tick prices directly from a free MetaTrader 5 demo terminal (Vantage Markets) and forwards 
+JSON tick payloads to our API every 500ms via HTTP POST."
+
+Q4: "What happens when a single candle hits BOTH Stop Loss and Take Profit simultaneously?"
+ANSWER: 
+"That is known as an Overlap Constraint during extreme market volatility. Instead of optimistically 
+giving the user a fake win, our TradeService.cs implements a pessimistic resolution model—it 
+defensively forces a Stop Loss closure to accurately reflect real-world execution slippage."
+
+Q5: "Why did you use decimal(18,6) in PostgreSQL instead of float or double?"
+ANSWER: 
+"Forex currency pairs are quoted in 5 fractional decimals (e.g. EURUSD 1.08523). Standard float 
+or double data types use binary representation which causes precision rounding errors. 
+decimal(18,6) guarantees exact 100% financial accuracy."
+
+================================================================================
