@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, createSeriesMarkers } from 'lightweight-charts';
+import { Globe } from 'lucide-react';
 
 /**
  * Premium TradingChart component using Lightweight Charts v5.
  * Overhauled to resemble a professional TradingView chart:
  *  - High-precision Candlestick series with custom ICT/SMC styling
+ *  - ICT / SMC Kill Zone Session indicators (Asian Range, London Kill Zone, New York Kill Zone)
  *  - 20-period Simple Moving Average (SMA) technical indicator overlay
  *  - Volume histogram subchart with synthetic fallback for zero-volume datasets
- *  - Custom HUD legend showing candle O, H, L, C, V, price change %, and SMA
- *  - Dotted grid lines and TV-style scale margins
+ *  - Custom HUD legend showing candle O, H, L, C, V, price change %, SMA, & active session
  */
 const TIMEFRAMES = [
     { label: '1m',  value: 1   },
@@ -17,6 +18,22 @@ const TIMEFRAMES = [
     { label: '1H',  value: 60  },
     { label: '4H',  value: 240 },
 ];
+
+const getActiveSessionInfo = (utcHour) => {
+    if (utcHour >= 0 && utcHour < 6) {
+        return { name: 'ASIAN RANGE', color: 'text-indigo-400 bg-indigo-950/60 border-indigo-800/80', badge: '🌐 Asian' };
+    }
+    if (utcHour >= 7 && utcHour < 10) {
+        return { name: 'LONDON KILL ZONE', color: 'text-sky-400 bg-sky-950/60 border-sky-800/80', badge: '🇬🇧 London KZ' };
+    }
+    if (utcHour >= 13 && utcHour < 16) {
+        return { name: 'NEW YORK KILL ZONE', color: 'text-amber-400 bg-amber-950/60 border-amber-800/80', badge: '🇺🇸 New York KZ' };
+    }
+    if (utcHour >= 16 && utcHour < 18) {
+        return { name: 'LONDON CLOSE', color: 'text-emerald-400 bg-emerald-950/60 border-emerald-800/80', badge: '🌆 London Close' };
+    }
+    return { name: 'OFF-PEAK SESSION', color: 'text-slate-400 bg-slate-900/60 border-slate-800/80', badge: '🌙 Off-Peak' };
+};
 
 const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) => {
     const chartContainerRef = useRef(null);
@@ -28,6 +45,9 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
     const priceLinesRef = useRef([]);
     const initialScrollDoneRef = useRef(false);
     const prevTimeframeRef = useRef(timeframe);
+
+    // Toggle for Kill Zone session visual overlay
+    const [showKillZones, setShowKillZones] = useState(true);
 
     // Local HUD state for hover values
     const [hudData, setHudData] = useState(null);
@@ -46,7 +66,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             width: chartContainerRef.current.clientWidth,
             height: 520,
             grid: {
-                vertLines: { color: '#1e293b', style: 3 }, // 3 is dotted style
+                vertLines: { color: '#1e293b', style: 3 },
                 horzLines: { color: '#1e293b', style: 3 },
             },
             timeScale: {
@@ -62,7 +82,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                 autoScale: true,
                 scaleMargins: {
                     top: 0.12,
-                    bottom: 0.28, // Leave bottom 28% for volume overlay
+                    bottom: 0.28,
                 },
             },
             crosshair: {
@@ -85,7 +105,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
 
         // 2. SMA Line indicator series initialization
         const smaSeries = chart.addSeries(LineSeries, {
-            color: '#f59e0b', // Amber/Gold color
+            color: '#f59e0b',
             lineWidth: 1.5,
             priceLineVisible: false,
             crosshairMarkerVisible: false,
@@ -97,11 +117,10 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             priceScaleId: 'volume-scale',
         });
 
-        // Configure separate vertical price scale for volume and hide its axis labels
         chart.priceScale('volume-scale').applyOptions({
-            visible: false, // Hide vertical axis for volume to prevent clutter
+            visible: false,
             scaleMargins: {
-                top: 0.78, // volume series takes up bottom 22% of chart
+                top: 0.78,
                 bottom: 0,
             },
         });
@@ -111,10 +130,8 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
         smaRef.current = smaSeries;
         volumeRef.current = volumeSeries;
 
-        // Initialize v5 Markers API for the candlestick series
         markersApiRef.current = createSeriesMarkers(candleSeries);
 
-        // Auto-resize on container size changes
         const resizeObserver = new ResizeObserver(entries => {
             if (entries.length === 0 || !chartContainerRef.current) return;
             chart.applyOptions({ width: chartContainerRef.current.clientWidth });
@@ -136,6 +153,9 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                 const diff = closeVal - openVal;
                 const pct = (diff / openVal) * 100;
 
+                const utcDate = new Date(param.time * 1000);
+                const sessionInfo = getActiveSessionInfo(utcDate.getUTCHours());
+
                 setHudData({
                     open: cData.open,
                     high: cData.high,
@@ -144,7 +164,8 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                     volume: vData ? vData.value : 0,
                     change: diff,
                     changePercent: pct,
-                    sma: sData ? sData.value : null
+                    sma: sData ? sData.value : null,
+                    session: sessionInfo
                 });
             } else {
                 setHudData(null);
@@ -166,7 +187,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
     useEffect(() => {
         if (!seriesRef.current || !volumeRef.current || !smaRef.current || !data || data.length === 0) return;
 
-        // Map and sort raw candles
         const formattedCandles = data
             .map(c => ({
                 time: Math.floor(new Date(c.timestamp ?? c.Timestamp).getTime() / 1000),
@@ -192,7 +212,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             }
         }
 
-        // Map volume dataset (generating deterministic synthetic tick volume if volume is 0)
         const formattedVolume = data
             .map(c => {
                 const openVal = Number(c.open ?? c.Open);
@@ -202,8 +221,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                 const rawVol = Number(c.volume ?? c.Volume ?? 0);
                 const timeSec = Math.floor(new Date(c.timestamp ?? c.Timestamp).getTime() / 1000);
 
-                // Deterministic synthetic volume calculation (proportional to candle range + timestamp hash)
-                // Ensures volume bars remain stable and stationary during tick updates
                 const range = Math.max(0.00001, highVal - lowVal);
                 const pseudoHash = (timeSec % 37) + 5;
                 const volumeValue = rawVol > 0
@@ -213,7 +230,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                 return {
                     time: timeSec,
                     value: volumeValue,
-                    // Semitransparent fill: Green volume if candle is bullish, red if bearish
                     color: closeVal >= openVal ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.28)',
                 };
             })
@@ -223,13 +239,15 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
         volumeRef.current.setData(formattedVolume);
         smaRef.current.setData(smaData);
 
-        // Update latest candle close in default HUD view
+        // Default HUD update
         if (formattedCandles.length > 0 && !hudData) {
             const lastCandle = formattedCandles[formattedCandles.length - 1];
             const lastVolume = formattedVolume[formattedVolume.length - 1];
             const lastSma = smaData.length > 0 ? smaData[smaData.length - 1].value : null;
             const diff = lastCandle.close - lastCandle.open;
             const pct = (diff / lastCandle.open) * 100;
+            const utcDate = new Date(lastCandle.time * 1000);
+            const sessionInfo = getActiveSessionInfo(utcDate.getUTCHours());
             
             setHudData({
                 open: lastCandle.open,
@@ -239,11 +257,12 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                 volume: lastVolume ? lastVolume.value : 0,
                 change: diff,
                 changePercent: pct,
-                sma: lastSma
+                sma: lastSma,
+                session: sessionInfo
             });
         }
 
-        // Clear previous price lines
+        // Price lines for open trades
         if (priceLinesRef.current) {
             priceLinesRef.current.forEach(line => {
                 try {
@@ -255,7 +274,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             priceLinesRef.current = [];
         }
 
-        // Draw new price lines for active open trades (both live and replay)
         if (trades && trades.length > 0) {
             trades.forEach(t => {
                 const isOpen = t.status === 0 || t.status === 'Open' || t.Status === 0 || t.Status === 'Open' || t.Status === 'open' || t.status === 'open';
@@ -266,9 +284,9 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                     if (stopLoss > 0) {
                         const slLine = seriesRef.current.createPriceLine({
                             price: stopLoss,
-                            color: '#ef4444', // Red for SL
+                            color: '#ef4444',
                             lineWidth: 1,
-                            lineStyle: 1, // Dotted
+                            lineStyle: 1,
                             axisLabelVisible: true,
                             title: `SL: ${stopLoss.toFixed(5)}`,
                         });
@@ -278,9 +296,9 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                     if (takeProfit > 0) {
                         const tpLine = seriesRef.current.createPriceLine({
                             price: takeProfit,
-                            color: '#10b981', // Green for TP
+                            color: '#10b981',
                             lineWidth: 1,
-                            lineStyle: 1, // Dotted
+                            lineStyle: 1,
                             axisLabelVisible: true,
                             title: `TP: ${takeProfit.toFixed(5)}`,
                         });
@@ -290,13 +308,10 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             });
         }
 
-        // Execution markers plotting
+        // Execution markers
         if (markersApiRef.current) {
             if (trades && trades.length > 0) {
                 const markers = [];
-
-                // Deduplicate trades by id — prefer the closed version (from tradeHistory)
-                // This prevents doubled markers when a just-closed trade appears in both arrays
                 const seenIds = new Map();
                 trades.forEach(t => {
                     const existing = seenIds.get(t.id);
@@ -315,7 +330,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                     const isBuy = t.direction === 0 || t.direction === 'Buy';
                     const entryPrice = Number(t.entryPrice ?? t.EntryPrice ?? t.entry ?? 0);
 
-                    // Plot Entry Marker
                     markers.push({
                         time: openTimeSec,
                         position: isBuy ? 'belowBar' : 'aboveBar',
@@ -324,7 +338,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                         text: isBuy ? `BUY @ ${entryPrice.toFixed(5)}` : `SELL @ ${entryPrice.toFixed(5)}`,
                     });
 
-                    // Plot Exit Marker if trade is Closed
                     if (t.status === 1 || t.status === 'Closed') {
                         const closeTime = t.closedAt ?? t.ClosedAt;
                         if (!closeTime) return;
@@ -344,7 +357,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                     }
                 });
 
-                // Sort markers by time
                 markers.sort((a, b) => a.time - b.time);
                 markersApiRef.current.setMarkers(markers);
             } else {
@@ -352,8 +364,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             }
         }
 
-        // Auto-scroll camera to latest candle ONLY on initial mount or timeframe switch.
-        // When price plays forward (live ticks or replay steps), do NOT snap/stick camera to rightmost side.
         if (!initialScrollDoneRef.current || prevTimeframeRef.current !== timeframe) {
             initialScrollDoneRef.current = true;
             prevTimeframeRef.current = timeframe;
@@ -364,30 +374,50 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
 
     return (
         <div className="relative w-full rounded-xl overflow-hidden bg-[#090d16] border border-slate-800">
-            {/* Chart header: Timeframe switcher + HUD legend */}
-            <div className="flex items-center justify-between px-4 pt-3 pb-1 gap-4">
-                {/* Timeframe switcher buttons */}
-                <div className="flex items-center gap-1">
-                    {TIMEFRAMES.map(tf => (
-                        <button
-                            key={tf.value}
-                            id={`tf-btn-${tf.label}`}
-                            onClick={() => onTimeframeChange && onTimeframeChange(tf.value)}
-                            className={`px-2.5 py-1 text-[11px] font-bold rounded transition-all duration-150 ${
-                                timeframe === tf.value
-                                    ? 'bg-blue-600 text-white shadow shadow-blue-900/60'
-                                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                            }`}
-                        >
-                            {tf.label}
-                        </button>
-                    ))}
+            {/* Chart header: Timeframe switcher + Session Toggle + HUD legend */}
+            <div className="flex flex-wrap items-center justify-between px-4 pt-3 pb-1 gap-2 sm:gap-4">
+                {/* Timeframe switcher buttons + Kill Zones Toggle */}
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                        {TIMEFRAMES.map(tf => (
+                            <button
+                                key={tf.value}
+                                id={`tf-btn-${tf.label}`}
+                                onClick={() => onTimeframeChange && onTimeframeChange(tf.value)}
+                                className={`px-2.5 py-1 text-[11px] font-bold rounded transition-all duration-150 ${
+                                    timeframe === tf.value
+                                        ? 'bg-blue-600 text-white shadow shadow-blue-900/60'
+                                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                                }`}
+                            >
+                                {tf.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <button
+                        onClick={() => setShowKillZones(!showKillZones)}
+                        className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded border transition-all duration-150 ${
+                            showKillZones
+                                ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60 shadow shadow-indigo-950/50'
+                                : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
+                        }`}
+                        title="Toggle ICT/SMC Kill Zone Session Overlays"
+                    >
+                        <Globe size={13} />
+                        <span>Sessions</span>
+                    </button>
                 </div>
 
                 {/* HUD Legend */}
-                <div className="flex flex-wrap gap-3 sm:gap-4 text-xs font-mono bg-slate-950/85 backdrop-blur border border-slate-800/80 px-4 py-2 rounded-lg text-slate-400 select-none shadow-lg">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-mono bg-slate-950/85 backdrop-blur border border-slate-800/80 px-4 py-1.5 rounded-lg text-slate-400 select-none shadow-lg">
                     {hudData ? (
                         <>
+                            {showKillZones && hudData.session && (
+                                <div className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border ${hudData.session.color}`}>
+                                    {hudData.session.badge}
+                                </div>
+                            )}
                             <div>O <span className="text-white ml-0.5">{hudData.open.toFixed(5)}</span></div>
                             <div>H <span className="text-white ml-0.5">{hudData.high.toFixed(5)}</span></div>
                             <div>L <span className="text-white ml-0.5">{hudData.low.toFixed(5)}</span></div>
