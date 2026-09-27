@@ -97,9 +97,21 @@ const TradeRow = ({ trade }) => {
 
 // ─── Main Page Component ──────────────────────────────────────────────────────
 
+const SUPPORTED_ASSETS = [
+  { symbol: 'EURUSD', name: 'EUR/USD · Euro', type: 'Major Forex' },
+  { symbol: 'GBPUSD', name: 'GBP/USD · British Pound', type: 'Major Forex' },
+  { symbol: 'USDJPY', name: 'USD/JPY · Japanese Yen', type: 'JPY Forex' },
+  { symbol: 'AUDUSD', name: 'AUD/USD · Aussie Dollar', type: 'Major Forex' },
+  { symbol: 'XAUUSD', name: 'XAU/USD · Gold Spot', type: 'Commodity' },
+  { symbol: 'BTCUSD', name: 'BTC/USD · Bitcoin', type: 'Crypto' },
+];
+
 const ReplayPage = () => {
   // ── Auth ────────────────────────────────────────────────────────────────────
   const { user, logout } = useAuth();
+
+  // Selected Asset symbol
+  const [symbol, setSymbol] = useState("EURUSD");
 
   // User-scoped storage key for replay session persistence
   const userId = user?.userId ?? user?.username ?? 'guest';
@@ -160,19 +172,18 @@ const ReplayPage = () => {
     }
   }, []);
 
-  // Check DB status on mount — does NOT overwrite selectedStartTime (user keeps their choice)
+  // Check DB status on symbol change (auto-seeds synthetic candles if empty)
   useEffect(() => {
     const checkDb = async () => {
       try {
-        const res = await client.get("/Seed/status?symbol=EURUSD");
+        const res = await client.get(`/Seed/status?symbol=${symbol}`);
         setDbStatus(res.data);
-        // Do NOT auto-set selectedStartTime here — user has a sensible default (2024-02-01)
       } catch {
         setDbStatus({ count: 0, message: "API unreachable" });
       }
     };
     checkDb();
-  }, []);
+  }, [symbol]);
 
   // ── Restore persisted session on mount ──────────────────────────────────────
   useEffect(() => {
@@ -213,7 +224,7 @@ const ReplayPage = () => {
         : "2024-02-01T00:00:00Z";
 
       const res = await client.post(
-        `/Replay/start?symbol=EURUSD&startTime=${startTime}`
+        `/Replay/start?symbol=${symbol}&startTime=${startTime}`
       );
       setSession(res.data);
       // Persist sessionId so it survives navigation (analytics -> back) and page refresh
@@ -229,15 +240,20 @@ const ReplayPage = () => {
   };
 
   // Reset: clear persisted session and start fresh
-  const resetSession = () => {
-    if (window.confirm("Reset current session? All trades and progress will be cleared from this view.")) {
-      localStorage.removeItem(SESSION_KEY);
-      setSession(null);
-      setCandles([]);
-      setTrades([]);
-      setError(null);
-      setTradeMessage(null);
+  const resetSession = async () => {
+    try {
+      if (session) {
+        await client.post(`/Replay/${session.id}/reset`);
+      }
+    } catch (e) {
+      console.error("Backend reset error:", e);
     }
+    localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    setCandles([]);
+    setTrades([]);
+    setError(null);
+    setTradeMessage({ type: "success", text: "Replay session reset. Press 'Start Session' to begin a new replay." });
   };
 
   const stepForward = async (minutes) => {
@@ -294,8 +310,19 @@ const ReplayPage = () => {
     }
   };
 
+  const activeSymbol = session?.symbol ?? session?.Symbol ?? symbol;
+
+  const formatPriceVal = useCallback((val) => {
+    if (val === null || val === undefined || isNaN(val)) return "—";
+    const num = Number(val);
+    const sym = activeSymbol.toUpperCase();
+    if (sym.includes("JPY") || (num >= 20 && num < 1000)) return num.toFixed(3);
+    if (sym === "XAUUSD" || sym === "BTCUSD" || num >= 1000) return num.toFixed(2);
+    return num.toFixed(5);
+  }, [activeSymbol]);
+
   const currentPrice = candles.length > 0
-    ? Number(candles[candles.length - 1].close ?? candles[candles.length - 1].Close).toFixed(5)
+    ? formatPriceVal(candles[candles.length - 1].close ?? candles[candles.length - 1].Close)
     : "—";
 
   const openTradesCount = trades.filter(
@@ -308,15 +335,25 @@ const ReplayPage = () => {
   
   const floatingPnL = openTrades.reduce((sum, t) => {
     if (isNaN(currentPriceNum)) return sum;
-    const pipValue = 10; // $10 per pip per standard lot
+    const sym = activeSymbol.toUpperCase();
     let pips = 0;
+    let pipValue = 10;
     const entry = Number(t.entryPrice ?? t.EntryPrice);
     const isBuy = t.direction === 0 || t.direction === "Buy";
+    const priceDiff = isBuy ? (currentPriceNum - entry) : (entry - currentPriceNum);
 
-    if (isBuy) {
-      pips = (currentPriceNum - entry) * 10000;
+    if (sym.includes("JPY")) {
+      pips = priceDiff * 100;
+      pipValue = 10;
+    } else if (sym === "XAUUSD" || sym === "GOLD") {
+      pips = priceDiff * 10;
+      pipValue = 10;
+    } else if (sym === "BTCUSD" || sym === "BITCOIN") {
+      pips = priceDiff;
+      pipValue = 1;
     } else {
-      pips = (entry - currentPriceNum) * 10000;
+      pips = priceDiff * 10000;
+      pipValue = 10;
     }
 
     const lotSize = Number(t.lotSize ?? t.LotSize ?? 0.1);
@@ -419,13 +456,13 @@ const ReplayPage = () => {
             {loading ? "Initializing..." : session ? "Session Active" : "Start Session"}
           </button>
 
-          {/* Reset Session button — only visible when a session is active */}
-          {session && (
+          {/* Reset Session button — visible when session or data is loaded */}
+          {(session || candles.length > 0 || trades.length > 0) && (
             <button
               onClick={resetSession}
               id="btn-reset-session"
               title="Reset Session"
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-400 hover:bg-red-950/60 hover:text-red-400 hover:border-red-800 transition"
+              className="flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-red-950/60 hover:text-red-400 hover:border-red-800 transition cursor-pointer"
             >
               ↺ Reset
             </button>
@@ -456,7 +493,28 @@ const ReplayPage = () => {
 
       {/* ── Stats Bar ── */}
       <div className="px-6 pt-4 flex flex-wrap gap-3">
-        <StatCard label="Symbol" value="EURUSD" icon={BarChart2} />
+        <div className="flex items-center gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800">
+          <BarChart2 size={16} className="text-blue-400" />
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-widest">Symbol</p>
+            {session ? (
+              <p className="text-sm font-bold font-mono text-white">{activeSymbol}</p>
+            ) : (
+              <select
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+                id="select-replay-asset"
+                className="bg-slate-800 text-white font-mono font-bold text-xs rounded-lg border border-slate-700 px-2 py-1 focus:outline-none focus:border-blue-500 transition cursor-pointer"
+              >
+                {SUPPORTED_ASSETS.map((asset) => (
+                  <option key={asset.symbol} value={asset.symbol}>
+                    {asset.symbol} ({asset.type})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
         <StatCard label="Current Price" value={currentPrice} color="text-blue-300" icon={Activity} />
         <StatCard label="Replay Time" value={formattedTime} icon={Clock} color="text-slate-300" />
         
@@ -520,7 +578,7 @@ const ReplayPage = () => {
           {/* Chart */}
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
-              <TradingChart data={candles} trades={trades} timeframe={timeframe} onTimeframeChange={handleTimeframeChange} />
+              <TradingChart data={candles} trades={trades} timeframe={timeframe} symbol={activeSymbol} onTimeframeChange={handleTimeframeChange} />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center">
@@ -599,7 +657,7 @@ const ReplayPage = () => {
             <div className="bg-slate-800/60 rounded-lg p-3 mb-4 text-center border border-slate-700">
               <p className="text-xs text-slate-500 mb-0.5">ASK / BID (Market)</p>
               <p className="font-mono text-lg font-bold text-blue-300">{currentPrice}</p>
-              <p className="text-xs text-slate-600 mt-0.5">EURUSD · 1-Minute</p>
+              <p className="text-xs text-slate-600 mt-0.5">{activeSymbol} · 1-Minute</p>
             </div>
 
             <div className="space-y-3">

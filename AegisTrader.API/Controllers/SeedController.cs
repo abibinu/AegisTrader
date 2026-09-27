@@ -28,9 +28,17 @@ public class SeedController : ControllerBase
     [HttpGet("status")]
     public async Task<IActionResult> GetStatus([FromQuery] string symbol = "EURUSD")
     {
+        symbol = symbol.ToUpperInvariant();
         var count = await _context.Candlesticks
             .Where(c => c.Symbol == symbol)
             .CountAsync();
+
+        if (count == 0)
+        {
+            // Auto-seed synthetic candles for requested symbol if missing
+            await _importService.GenerateSyntheticCandlesAsync(symbol, 5000);
+            count = await _context.Candlesticks.Where(c => c.Symbol == symbol).CountAsync();
+        }
 
         if (count == 0)
             return Ok(new { symbol, count = 0, message = $"No data seeded for {symbol}" });

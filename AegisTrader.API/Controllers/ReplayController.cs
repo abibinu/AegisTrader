@@ -72,4 +72,11 @@ public class ReplayController : ControllerBase
             return NotFound();
         return Ok(session);
     }
+
+    [HttpPost("{sessionId}/reset")]
+    public async Task<IActionResult> ResetSession(Guid sessionId)
+    {
+        var session = await _replayService.ResetSession(sessionId);
+        return Ok(session);
+    }
 }

@@ -82,23 +82,43 @@ public class TradeService
         trade.ExitPrice = exitPrice;
         trade.ClosedAt  = closeTime;
 
-        // Forex pip calculation:
-        // 1 standard lot EURUSD = $10 per pip
-        // 1 pip = 0.0001 (4th decimal place)
-        // Pips moved = price difference × 10,000
-        decimal pipValue = 10m; // per standard lot, per pip
-        decimal pips;
+        string symbol = session?.Symbol ?? "EURUSD";
+        trade.PnL = CalculatePnL(symbol, trade.Direction, trade.EntryPrice, exitPrice, trade.LotSize);
 
-        if (trade.Direction == TradeDirection.Buy)
-            pips = (exitPrice - trade.EntryPrice) * 10000m;
-        else
-            pips = (trade.EntryPrice - exitPrice) * 10000m;
-
-        trade.PnL = pips * trade.LotSize * pipValue;
-
-        // FIX: Persist the balance change to the session so analytics are accurate.
-        // Previously this was never done — session.CurrentBalance stayed at 10,000 forever.
+        // Persist the balance change to the session so analytics are accurate.
         if (session != null)
             session.CurrentBalance += trade.PnL;
+    }
+
+    public static decimal CalculatePnL(string symbol, TradeDirection direction, decimal entryPrice, decimal exitPrice, decimal lotSize)
+    {
+        var sym = symbol.ToUpperInvariant();
+        decimal pips = 0m;
+        decimal pipValue = 10m; // standard lot
+
+        decimal priceDiff = direction == TradeDirection.Buy ? (exitPrice - entryPrice) : (entryPrice - exitPrice);
+
+        if (sym == "USDJPY" || sym.EndsWith("JPY"))
+        {
+            pips = priceDiff * 100m;
+            pipValue = 10m;
+        }
+        else if (sym == "XAUUSD" || sym == "GOLD")
+        {
+            pips = priceDiff * 10m; // 0.10 per point
+            pipValue = 10m;
+        }
+        else if (sym == "BTCUSD" || sym == "BITCOIN")
+        {
+            pips = priceDiff;
+            pipValue = 1m;
+        }
+        else // 5-decimal Forex pairs (EURUSD, GBPUSD, AUDUSD, etc.)
+        {
+            pips = priceDiff * 10000m;
+            pipValue = 10m;
+        }
+
+        return pips * lotSize * pipValue;
     }
 }

@@ -79,6 +79,7 @@ public class LivePriceController : ControllerBase
     [HttpGet("latest")]
     public async Task<IActionResult> GetLatestPrice([FromQuery] string symbol = "EURUSD")
     {
+        symbol = symbol.ToUpperInvariant();
         var tick = _priceCache.GetPrice(symbol);
         if (tick == null)
         {
@@ -88,14 +89,32 @@ public class LivePriceController : ControllerBase
                 .OrderByDescending(c => c.Timestamp)
                 .FirstOrDefaultAsync();
 
-            decimal defaultBid = latestDbCandle != null ? latestDbCandle.Close : 1.13850m;
-            decimal defaultAsk = defaultBid + 0.00012m;
+            decimal baseFallback = symbol switch
+            {
+                "GBPUSD" => 1.28500m,
+                "USDJPY" => 154.500m,
+                "AUDUSD" => 0.65500m,
+                "XAUUSD" => 2650.00m,
+                "BTCUSD" => 68500.00m,
+                _        => 1.08500m
+            };
+
+            decimal spread = symbol switch
+            {
+                "USDJPY" => 0.012m,
+                "XAUUSD" => 0.25m,
+                "BTCUSD" => 5.00m,
+                _        => 0.00012m
+            };
+
+            decimal defaultBid = latestDbCandle != null ? latestDbCandle.Close : baseFallback;
+            decimal defaultAsk = defaultBid + spread;
 
             _priceCache.UpdatePrice(symbol, defaultBid, defaultAsk);
 
             return Ok(new
             {
-                Symbol = symbol.ToUpperInvariant(),
+                Symbol = symbol,
                 Bid = defaultBid,
                 Ask = defaultAsk,
                 Timestamp = DateTime.UtcNow,

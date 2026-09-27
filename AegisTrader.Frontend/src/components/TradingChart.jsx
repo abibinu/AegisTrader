@@ -35,7 +35,16 @@ const getActiveSessionInfo = (utcHour) => {
     return { name: 'OFF-PEAK SESSION', color: 'text-slate-400 bg-slate-900/60 border-slate-800/80', badge: '🌙 Off-Peak' };
 };
 
-const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) => {
+const formatPriceDynamic = (val, sym) => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    const num = Number(val);
+    const upperSym = sym?.toUpperCase() ?? '';
+    if (upperSym.includes('JPY') || (num >= 20 && num < 1000)) return num.toFixed(3);
+    if (upperSym === 'XAUUSD' || upperSym === 'BTCUSD' || num >= 1000) return num.toFixed(2);
+    return num.toFixed(5);
+};
+
+const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, symbol = 'EURUSD' }) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
@@ -288,7 +297,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                             lineWidth: 1,
                             lineStyle: 1,
                             axisLabelVisible: true,
-                            title: `SL: ${stopLoss.toFixed(5)}`,
+                            title: `SL: ${formatPriceDynamic(stopLoss, symbol)}`,
                         });
                         priceLinesRef.current.push(slLine);
                     }
@@ -300,7 +309,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                             lineWidth: 1,
                             lineStyle: 1,
                             axisLabelVisible: true,
-                            title: `TP: ${takeProfit.toFixed(5)}`,
+                            title: `TP: ${formatPriceDynamic(takeProfit, symbol)}`,
                         });
                         priceLinesRef.current.push(tpLine);
                     }
@@ -335,7 +344,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                         position: isBuy ? 'belowBar' : 'aboveBar',
                         color: isBuy ? '#10b981' : '#ef4444',
                         shape: isBuy ? 'arrowUp' : 'arrowDown',
-                        text: isBuy ? `BUY @ ${entryPrice.toFixed(5)}` : `SELL @ ${entryPrice.toFixed(5)}`,
+                        text: isBuy ? `BUY @ ${formatPriceDynamic(entryPrice, symbol)}` : `SELL @ ${formatPriceDynamic(entryPrice, symbol)}`,
                     });
 
                     if (t.status === 1 || t.status === 'Closed') {
@@ -352,7 +361,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                             position: isBuy ? 'aboveBar' : 'belowBar',
                             color: isWin ? '#10b981' : '#ef4444',
                             shape: 'circle',
-                            text: `EXIT @ ${exitPrice.toFixed(5)} (${isWin ? '+' : ''}${Number(t.pnl ?? t.pnL ?? 0).toFixed(2)})`,
+                            text: `EXIT @ ${formatPriceDynamic(exitPrice, symbol)} (${isWin ? '+' : ''}${Number(t.pnl ?? t.pnL ?? 0).toFixed(2)})`,
                         });
                     }
                 });
@@ -370,7 +379,7 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
             chartRef.current.timeScale().scrollToPosition(0, false);
         }
 
-    }, [data, trades, timeframe]);
+    }, [data, trades, timeframe, symbol]);
 
     return (
         <div className="relative w-full rounded-xl overflow-hidden bg-[#090d16] border border-slate-800">
@@ -418,18 +427,18 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange }) =
                                     {hudData.session.badge}
                                 </div>
                             )}
-                            <div>O <span className="text-white ml-0.5">{hudData.open.toFixed(5)}</span></div>
-                            <div>H <span className="text-white ml-0.5">{hudData.high.toFixed(5)}</span></div>
-                            <div>L <span className="text-white ml-0.5">{hudData.low.toFixed(5)}</span></div>
-                            <div>C <span className="text-white ml-0.5">{hudData.close.toFixed(5)}</span></div>
+                            <div>O <span className="text-white ml-0.5">{formatPriceDynamic(hudData.open, symbol)}</span></div>
+                            <div>H <span className="text-white ml-0.5">{formatPriceDynamic(hudData.high, symbol)}</span></div>
+                            <div>L <span className="text-white ml-0.5">{formatPriceDynamic(hudData.low, symbol)}</span></div>
+                            <div>C <span className="text-white ml-0.5">{formatPriceDynamic(hudData.close, symbol)}</span></div>
                             <div>V <span className="text-white ml-0.5">{hudData.volume.toLocaleString()}</span></div>
                             {hudData.sma && (
                                 <div className="text-amber-400 font-semibold">
-                                    SMA(20) <span className="ml-0.5">{hudData.sma.toFixed(5)}</span>
+                                    SMA(20) <span className="ml-0.5">{formatPriceDynamic(hudData.sma, symbol)}</span>
                                 </div>
                             )}
                             <div className={hudData.change >= 0 ? "text-emerald-400 font-semibold" : "text-rose-500 font-semibold"}>
-                                {hudData.change >= 0 ? '+' : ''}{hudData.change.toFixed(5)} ({hudData.changePercent.toFixed(2)}%)
+                                {hudData.change >= 0 ? '+' : ''}{formatPriceDynamic(hudData.change, symbol)} ({hudData.changePercent.toFixed(2)}%)
                             </div>
                         </>
                     ) : (

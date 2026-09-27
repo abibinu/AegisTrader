@@ -17,8 +17,20 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+const SUPPORTED_ASSETS = [
+  { symbol: 'EURUSD', name: 'EUR/USD · Euro', type: 'Major Forex' },
+  { symbol: 'GBPUSD', name: 'GBP/USD · British Pound', type: 'Major Forex' },
+  { symbol: 'USDJPY', name: 'USD/JPY · Japanese Yen', type: 'JPY Forex' },
+  { symbol: 'AUDUSD', name: 'AUD/USD · Aussie Dollar', type: 'Major Forex' },
+  { symbol: 'XAUUSD', name: 'XAU/USD · Gold Spot', type: 'Commodity' },
+  { symbol: 'BTCUSD', name: 'BTC/USD · Bitcoin', type: 'Crypto' },
+];
+
 const LivePage = () => {
   const { user, logout } = useAuth();
+
+  // Selected Asset symbol
+  const [symbol, setSymbol] = useState("EURUSD");
 
   // User-scoped storage keys so each user gets their own session history
   const userId = user?.userId ?? user?.username ?? 'guest';
@@ -27,9 +39,6 @@ const LivePage = () => {
   const STORAGE_HISTORY    = `live_trade_history_${userId}`;
 
   // ── States ──────────────────────────────────────────────────────────────────
-  // Start null — we wait for the real first tick from the API before rolling candles.
-  // This prevents the 1.08500 placeholder creating a massive gap candle against the
-  // historical baseline which ends at ~1.138.
   const [currentTick, setCurrentTick] = useState(null);
   const [prevTick, setPrevTick] = useState(null);
   const [candles, setCandles] = useState([]);
@@ -62,6 +71,39 @@ const LivePage = () => {
 
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
+
+  // Dynamic price formatter based on symbol
+  const formatPriceVal = useCallback((val) => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    const num = Number(val);
+    const sym = symbol?.toUpperCase() ?? '';
+    if (sym.includes('JPY') || (num >= 20 && num < 1000)) return num.toFixed(3);
+    if (sym === 'XAUUSD' || sym === 'BTCUSD' || num >= 1000) return num.toFixed(2);
+    return num.toFixed(5);
+  }, [symbol]);
+
+  // Dynamic PnL calculator supporting Forex, JPY, Gold, and Crypto
+  const calculatePnL = useCallback((direction, entry, exit, lotSize) => {
+    const sym = symbol?.toUpperCase() ?? 'EURUSD';
+    let pips = 0;
+    let pipValue = 10;
+    const priceDiff = direction === "Buy" ? (exit - entry) : (entry - exit);
+
+    if (sym.includes("JPY")) {
+      pips = priceDiff * 100;
+      pipValue = 10;
+    } else if (sym === "XAUUSD" || sym === "GOLD") {
+      pips = priceDiff * 10;
+      pipValue = 10;
+    } else if (sym === "BTCUSD" || sym === "BITCOIN") {
+      pips = priceDiff;
+      pipValue = 1;
+    } else {
+      pips = priceDiff * 10000;
+      pipValue = 10;
+    }
+    return pips * lotSize * pipValue;
+  }, [symbol]);
 
   // Helper: aggregate an array of 1m candle objects into N-minute candles (client-side)
   const aggregateCandles = useCallback((oneMinuteCandles, tf) => {
@@ -111,15 +153,15 @@ const LivePage = () => {
   // Persist state in user-scoped localStorage keys
   useEffect(() => {
     localStorage.setItem(STORAGE_BALANCE, balance.toString());
-  }, [balance]);
+  }, [balance, STORAGE_BALANCE]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_OPEN, JSON.stringify(openTrades));
-  }, [openTrades]);
+  }, [openTrades, STORAGE_OPEN]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_HISTORY, JSON.stringify(tradeHistory));
-  }, [tradeHistory]);
+  }, [tradeHistory, STORAGE_HISTORY]);
 
   // Sync ref so tick useEffect can read current open trades without stale closures
   const openTradesRef = useRef(openTrades);
@@ -134,29 +176,27 @@ const LivePage = () => {
   }, [currentTick]);
 
   // Guard set: track trade IDs currently being closed to prevent duplicate closes
-  // This is critical to prevent React StrictMode double-invocation of effects
   const processingTradeIds = useRef(new Set());
 
-  // Check DB status on mount
+  // Check DB status on symbol change (auto-seeds synthetic candles if empty)
   useEffect(() => {
     const checkDb = async () => {
       try {
-        const res = await client.get("/Seed/status?symbol=EURUSD");
+        const res = await client.get(`/Seed/status?symbol=${symbol}`);
         setDbStatus(res.data);
       } catch {
         setDbStatus({ count: 0, message: "API unreachable" });
       }
     };
     checkDb();
-  }, []);
+  }, [symbol]);
 
-  // Fetch baseline history from API for the selected timeframe (returns 500 aggregated bars)
+  // Fetch baseline history from API for the selected timeframe & symbol
   const fetchBaselineHistory = useCallback(async (tf = 1) => {
     try {
-      const res = await client.get(`/LivePrice/history?symbol=EURUSD&count=500&timeframe=${tf}`);
+      const res = await client.get(`/LivePrice/history?symbol=${symbol}&count=500&timeframe=${tf}`);
       const history = res.data;
       if (history && history.length > 0) {
-        // Calculate timestamp offset (integer minutes) so history ends cleanly 1 timeframe-bucket before current time
         const latestCandleTime = new Date(history[history.length - 1].timestamp ?? history[history.length - 1].Timestamp).getTime();
         const currentMs = Date.now();
         const tfMs = tf * 60000;
@@ -164,7 +204,6 @@ const LivePage = () => {
         const targetHistoricalEndTime = currentBucketStart - tfMs;
         const offsetMs = Math.floor((targetHistoricalEndTime - latestCandleTime) / 60000) * 60000;
 
-        // Shift timestamps cleanly
         let shiftedHistory = history.map(c => {
           const originalTime = new Date(c.timestamp ?? c.Timestamp).getTime();
           const newTimeMs = Math.floor((originalTime + offsetMs) / 60000) * 60000;
@@ -183,13 +222,10 @@ const LivePage = () => {
             Close: Number(c.close ?? c.Close),
             volume: Number(c.volume ?? c.Volume ?? 0),
             Volume: Number(c.volume ?? c.Volume ?? 0),
-            isLive: false // Mark baseline candles so live ticks never mutate them
+            isLive: false
           };
         });
 
-        // Price baseline normalization:
-        // Use currentTickRef (no hook dependency loop!) to shift historical price levels vertically
-        // so the last historical close seamlessly matches currentTick.bid.
         const latestClose = shiftedHistory[shiftedHistory.length - 1].close;
         const targetPrice = currentTickRef.current ? currentTickRef.current.bid : null;
         if (targetPrice && Math.abs(targetPrice - latestClose) > 0.00050) {
@@ -208,7 +244,7 @@ const LivePage = () => {
     } catch (err) {
       console.error("Failed to load historical candles:", err);
     }
-  }, []);
+  }, [symbol]);
 
   useEffect(() => {
     fetchBaselineHistory(timeframe);
@@ -219,11 +255,17 @@ const LivePage = () => {
     fetchBaselineHistory(tf);
   }, [fetchBaselineHistory]);
 
+  const handleSymbolChange = (newSymbol) => {
+    setSymbol(newSymbol);
+    setCurrentTick(null);
+    setCandles([]);
+  };
+
   // ── Tick Polling & Chart Rolling Engine ─────────────────────────────────────
   useEffect(() => {
     const pollTick = async () => {
       try {
-        const res = await client.get("/LivePrice/latest?symbol=EURUSD");
+        const res = await client.get(`/LivePrice/latest?symbol=${symbol}`);
         const tick = res.data;
         const newTick = {
           symbol: tick.symbol ?? tick.Symbol,
@@ -240,12 +282,10 @@ const LivePage = () => {
       }
     };
 
-    // Fetch the FIRST real tick immediately on mount so we never use the null placeholder
     pollTick();
-    // Then continue polling every 500ms
     const interval = setInterval(pollTick, 500);
     return () => clearInterval(interval);
-  }, []);
+  }, [symbol]);
 
   // Roll ticks into chart candles for the active timeframe and check trade triggers
   useEffect(() => {
@@ -397,17 +437,6 @@ const LivePage = () => {
 
   }, [currentTick]);
 
-  // Calculate Pip value P&L (1 standard lot EURUSD = $10 per pip)
-  const calculatePnL = (direction, entry, exit, lotSize) => {
-    const pipValue = 10;
-    let pips = 0;
-    if (direction === "Buy") {
-      pips = (exit - entry) * 10000;
-    } else {
-      pips = (entry - exit) * 10000;
-    }
-    return pips * lotSize * pipValue;
-  };
 
   // ── Trade Placement ─────────────────────────────────────────────────────────
   const placeTrade = (direction) => {
@@ -491,16 +520,14 @@ const LivePage = () => {
   };
 
   const resetSession = () => {
-    if (window.confirm("Are you sure you want to reset your live paper balance to $10,000 and clear history?")) {
-      setBalance(10000);
-      setOpenTrades([]);
-      setTradeHistory([]);
-      setTradeMessage(null);
-      processingTradeIds.current.clear();
-      localStorage.removeItem(STORAGE_BALANCE);
-      localStorage.removeItem(STORAGE_OPEN);
-      localStorage.removeItem(STORAGE_HISTORY);
-    }
+    setBalance(10000);
+    setOpenTrades([]);
+    setTradeHistory([]);
+    setTradeMessage({ type: "success", text: "Live arena reset! Balance restored to $10,000." });
+    processingTradeIds.current.clear();
+    localStorage.removeItem(STORAGE_BALANCE);
+    localStorage.removeItem(STORAGE_OPEN);
+    localStorage.removeItem(STORAGE_HISTORY);
   };
 
   // ── Derived Values ──────────────────────────────────────────────────────────
@@ -577,10 +604,21 @@ const LivePage = () => {
       {/* ── Stats Bar ── */}
       <div className="px-6 pt-4 flex flex-wrap gap-3">
         <div className="flex items-center gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800">
-          <Activity size={16} className="text-slate-500" />
+          <BarChart2 size={16} className="text-blue-400" />
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-widest">Symbol</p>
-            <p className="text-sm font-bold font-mono text-white">EURUSD</p>
+            <select
+              value={symbol}
+              onChange={(e) => handleSymbolChange(e.target.value)}
+              id="select-asset-symbol"
+              className="bg-slate-800 text-white font-mono font-bold text-xs rounded-lg border border-slate-700 px-2 py-1 focus:outline-none focus:border-blue-500 transition cursor-pointer"
+            >
+              {SUPPORTED_ASSETS.map(asset => (
+                <option key={asset.symbol} value={asset.symbol}>
+                  {asset.symbol} ({asset.type})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -589,7 +627,7 @@ const LivePage = () => {
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-widest">Current Bid</p>
             <p className={`text-sm font-bold font-mono transition-colors duration-200 ${tickColor}`}>
-              {currentTick ? currentTick.bid.toFixed(5) : "Loading..."}
+              {currentTick ? formatPriceVal(currentTick.bid) : "Loading..."}
             </p>
           </div>
         </div>
@@ -650,6 +688,7 @@ const LivePage = () => {
                 data={candles}
                 trades={openTrades.concat(tradeHistory)}
                 timeframe={timeframe}
+                symbol={symbol}
                 onTimeframeChange={handleLiveTimeframeChange}
               />
             ) : (
@@ -802,11 +841,11 @@ const LivePage = () => {
             <div className="grid grid-cols-2 gap-2 mb-4">
               <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-center">
                 <p className="text-[10px] text-slate-500 mb-0.5">BID (Sell Price)</p>
-                <p className="font-mono text-sm font-bold text-rose-400">{currentTick ? currentTick.bid.toFixed(5) : "—"}</p>
+                <p className="font-mono text-sm font-bold text-rose-400">{currentTick ? formatPriceVal(currentTick.bid) : "—"}</p>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-center">
                 <p className="text-[10px] text-slate-500 mb-0.5">ASK (Buy Price)</p>
-                <p className="font-mono text-sm font-bold text-emerald-400">{currentTick ? currentTick.ask.toFixed(5) : "—"}</p>
+                <p className="font-mono text-sm font-bold text-emerald-400">{currentTick ? formatPriceVal(currentTick.ask) : "—"}</p>
               </div>
             </div>
 
@@ -819,10 +858,10 @@ const LivePage = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.00001"
+                  step={symbol.includes('JPY') ? "0.001" : (symbol === "XAUUSD" || symbol === "BTCUSD" ? "0.01" : "0.00001")}
                   value={sl}
                   onChange={(e) => setSl(e.target.value)}
-                  placeholder="e.g. 1.08200"
+                  placeholder={`e.g. ${symbol.includes('JPY') ? '154.000' : symbol === 'XAUUSD' ? '2640.00' : symbol === 'BTCUSD' ? '68000.00' : '1.08200'}`}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-650 focus:outline-none focus:border-rose-600/60 transition"
                 />
               </div>
@@ -835,10 +874,10 @@ const LivePage = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.00001"
+                  step={symbol.includes('JPY') ? "0.001" : (symbol === "XAUUSD" || symbol === "BTCUSD" ? "0.01" : "0.00001")}
                   value={tp}
                   onChange={(e) => setTp(e.target.value)}
-                  placeholder="e.g. 1.09200"
+                  placeholder={`e.g. ${symbol.includes('JPY') ? '155.500' : symbol === 'XAUUSD' ? '2665.00' : symbol === 'BTCUSD' ? '69200.00' : '1.09200'}`}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-650 focus:outline-none focus:border-emerald-600/60 transition"
                 />
               </div>

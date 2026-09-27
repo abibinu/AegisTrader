@@ -1,4 +1,4 @@
-﻿using AegisTrader.API.Data;
+using AegisTrader.API.Data;
 using AegisTrader.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -85,5 +85,19 @@ public class ReplayService
         await _context.Entry(session).ReloadAsync();
         await _context.SaveChangesAsync();
         return new StepResult(session.CurrentReplayTimestamp, session.CurrentBalance);
+    }
+
+    // 4. Reset an active replay session back to initial balance & clear trades
+    public async Task<TradingSession> ResetSession(Guid sessionId)
+    {
+        var session = await _context.TradingSessions.FindAsync(sessionId);
+        if (session == null) throw new Exception("Session not found");
+
+        var trades = await _context.Trades.Where(t => t.SessionId == sessionId).ToListAsync();
+        _context.Trades.RemoveRange(trades);
+
+        session.CurrentBalance = session.InitialBalance;
+        await _context.SaveChangesAsync();
+        return session;
     }
 }
