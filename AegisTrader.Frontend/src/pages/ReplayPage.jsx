@@ -5,6 +5,7 @@ import client from "../api/client";
 import TradingChart from "../components/TradingChart";
 import {
   Play,
+  Pause,
   FastForward,
   TrendingUp,
   TrendingDown,
@@ -144,6 +145,11 @@ const ReplayPage = () => {
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
 
+  // Auto-Playback state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x, 2x, 5x, 10x
+  const [autoStepMins, setAutoStepMins] = useState(1);   // 1m, 5m, 15m
+
   // ── API Calls ────────────────────────────────────────────────────────────────
 
   const fetchCandles = useCallback(async (sessionId, tf = 1) => {
@@ -241,6 +247,7 @@ const ReplayPage = () => {
 
   // Reset: clear persisted session and start fresh
   const resetSession = async () => {
+    setIsPlaying(false);
     try {
       if (session) {
         await client.post(`/Replay/${session.id}/reset`);
@@ -256,7 +263,7 @@ const ReplayPage = () => {
     setTradeMessage({ type: "success", text: "Replay session reset. Press 'Start Session' to begin a new replay." });
   };
 
-  const stepForward = async (minutes) => {
+  const stepForward = useCallback(async (minutes) => {
     if (!session) return;
     try {
       const res = await client.post(`/Replay/${session.id}/step?minutes=${minutes}`);
@@ -271,7 +278,28 @@ const ReplayPage = () => {
     } catch (err) {
       console.error("Step failed:", err);
       setError("Step forward failed.");
+      setIsPlaying(false);
     }
+  }, [session, timeframe, fetchCandles, fetchTrades]);
+
+  // Auto-playback loop effect
+  useEffect(() => {
+    if (!isPlaying || !session) return;
+
+    const intervalMs = Math.max(100, Math.floor(1000 / playbackSpeed));
+    const timer = setInterval(() => {
+      stepForward(autoStepMins);
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [isPlaying, session, playbackSpeed, autoStepMins, stepForward]);
+
+  const togglePlayPause = () => {
+    if (!session) {
+      setError("Start a session first before enabling auto-playback.");
+      return;
+    }
+    setIsPlaying(prev => !prev);
   };
 
 
@@ -552,27 +580,87 @@ const ReplayPage = () => {
         {/* Left: Chart + Timeline Controls */}
         <div className="flex-1 flex flex-col gap-3 min-w-0">
 
-          {/* Timeline step controls */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-slate-500 mr-1">STEP FORWARD:</span>
-            {[
-              { label: "+1m",  mins: 1   },
-              { label: "+5m",  mins: 5   },
-              { label: "+15m", mins: 15  },
-              { label: "+1H",  mins: 60  },
-              { label: "+4H",  mins: 240 },
-            ].map(({ label, mins }) => (
+          {/* Timeline & Auto-Playback Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-3 rounded-xl">
+            {/* Play / Pause & Auto-Step Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                key={label}
-                onClick={() => stepForward(mins)}
+                onClick={togglePlayPause}
                 disabled={!session}
-                id={`btn-step-${label.replace("+", "")}`}
-                className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs font-mono font-semibold transition disabled:opacity-30 disabled:cursor-not-allowed"
+                id="btn-play-pause"
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition border cursor-pointer ${
+                  isPlaying
+                    ? "bg-amber-950/80 border-amber-600/80 text-amber-300 shadow shadow-amber-950/60 animate-pulse"
+                    : "bg-emerald-950/80 border-emerald-600/80 text-emerald-400 hover:bg-emerald-900/90"
+                } disabled:opacity-30 disabled:cursor-not-allowed`}
               >
-                <FastForward size={11} />
-                {label}
+                {isPlaying ? <Pause size={14} className="fill-amber-300" /> : <Play size={14} className="fill-emerald-400" />}
+                <span>{isPlaying ? "PAUSE REPLAY" : "PLAY AUTO-REPLAY"}</span>
               </button>
-            ))}
+
+              {/* Playback Speed selector */}
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-xs">
+                <span className="text-[10px] text-slate-500 font-semibold px-2 uppercase tracking-wider">Speed:</span>
+                {[1, 2, 5, 10].map((spd) => (
+                  <button
+                    key={spd}
+                    onClick={() => setPlaybackSpeed(spd)}
+                    disabled={!session}
+                    id={`btn-speed-${spd}x`}
+                    className={`px-2 py-1 text-xs font-mono font-bold rounded transition cursor-pointer ${
+                      playbackSpeed === spd
+                        ? "bg-blue-600 text-white shadow"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {spd}x
+                  </button>
+                ))}
+              </div>
+
+              {/* Auto Step Interval */}
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-xs">
+                <span className="text-[10px] text-slate-500 font-semibold px-2 uppercase tracking-wider">Interval:</span>
+                {[1, 5, 15].map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setAutoStepMins(m)}
+                    disabled={!session}
+                    id={`btn-interval-${m}m`}
+                    className={`px-2 py-1 text-xs font-mono font-bold rounded transition cursor-pointer ${
+                      autoStepMins === m
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    +{m}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Manual Step Forward Buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mr-1">Manual:</span>
+              {[
+                { label: "+1m",  mins: 1   },
+                { label: "+5m",  mins: 5   },
+                { label: "+15m", mins: 15  },
+                { label: "+1H",  mins: 60  },
+                { label: "+4H",  mins: 240 },
+              ].map(({ label, mins }) => (
+                <button
+                  key={label}
+                  onClick={() => stepForward(mins)}
+                  disabled={!session || isPlaying}
+                  id={`btn-step-${label.replace("+", "")}`}
+                  className="flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 text-xs font-mono font-semibold transition disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <FastForward size={11} />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Chart */}

@@ -9,18 +9,20 @@
 
 **AegisTrader** is a full-stack, enterprise-grade trading simulation platform engineered for quantitative backtesting, live paper trading, and performance analytics. Specifically designed for **Inner Circle Trader (ICT)** and **Smart Money Concepts (SMC)** trading frameworks, the platform features a **deterministic historical replay engine** (with strict anti-lookahead timestamp protection) and a **real-time paper trading sandbox** powered by a **MetaTrader 5 (MT5) live price bridge**.
 
-### College Project Evaluator Assessment: MVP Readiness
+### College Project Evaluator Assessment: Complete Project Concluded
 
-- **Status:** **100% Ready for Initial MVP Presentation & Evaluation.**
+- **Status:** **100% Fully Completed & Concluded for Final Presentation.**
 - **Key Milestones Achieved:**
-  - **Full Stack Infrastructure:** ASP.NET Core 10 Web API + PostgreSQL (EF Core 10) + React 19 + Vite 8.
+  - **Full Stack Infrastructure:** ASP.NET Core Web API + PostgreSQL (EF Core) + React 19 + Vite.
   - **Security & Authentication:** User registration/login with BCrypt password hashing and JWT Bearer token state management.
-  - **Deterministic Replay Clock:** Zero-lookahead timestamp barrier restricting data visibility (`Timestamp <= CurrentReplayTimestamp`) with adjustable step-forward intervals (1m, 5m, 15m, 1H, 4H).
+  - **Auto-Playback Replay Engine:** Interactive **Play/Pause Auto-Forward Engine** with speed controls (1x, 2x, 5x, 10x) and interval step selection (+1m, +5m, +15m).
+  - **Deterministic Replay Clock:** Zero-lookahead timestamp barrier restricting data visibility (`Timestamp <= CurrentReplayTimestamp`) with manual step-forward intervals (1m, 5m, 15m, 1H, 4H).
+  - **Multi-Asset Expansion:** Native support for 6 asset classes across Major Forex (`EURUSD`, `GBPUSD`, `AUDUSD`), JPY Crosses (`USDJPY`), Commodities (`XAUUSD` Gold), and Crypto (`BTCUSD` Bitcoin) with asset-specific pip, point, and decimal formatting.
   - **Multi-Timeframe Aggregation Engine:** Server-side integer-division epoch grouping on 1-minute historical data without pre-calculated database tables.
   - **Live MT5 Price Feed Bridge:** Python bridge polling local MetaTrader 5 terminal (Vantage Markets demo) forwarding ticks at 500ms intervals with automatic simulation fallback.
-  - **Financial & Execution Math:** 5-decimal Forex pip calculations, dynamic unrealized floating P&L, lot sizing, and pessimistic **Overlap Constraint** resolution (defensive SL execution when a single candle hits both SL and TP).
-  - **Professional Visual Canvas:** TradingView Lightweight Charts v5 integration featuring candlesticks, SMA(20), volume histogram, interactive SL/TP horizontal lines, and order markers.
-  - **Analytical Dashboard:** Real-time calculation of Win Rate %, Profit Factor, Max Drawdown %, Net P&L, and Total Trades.
+  - **Financial & Execution Math:** Forex pip calculations, dynamic unrealized floating P&L, lot sizing, and pessimistic **Overlap Constraint** resolution (defensive SL execution when a single candle hits both SL and TP).
+  - **Institutional Visual Canvas:** TradingView Lightweight Charts v5 integration featuring ICT/SMC Session Overlays (Asian Range, London KZ, NY KZ), SMA(20), volume subchart, dynamic HUD legend, interactive SL/TP horizontal target lines, and order markers.
+  - **Institutional Risk & Analytics Dashboard:** Real-time calculation of Sharpe Ratio, Sortino Ratio, Expectancy, Win Rate %, Profit Factor, Max Drawdown %, Net P&L, Session Heatmaps, and Day-of-Week performance.
 
 ---
 
