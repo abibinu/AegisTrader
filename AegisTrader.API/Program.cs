@@ -61,6 +61,7 @@ builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ReplayService>();
 builder.Services.AddScoped<TradeService>();
 builder.Services.AddScoped<AggregationService>();
+builder.Services.AddScoped<MlForecastingService>();
 builder.Services.AddSingleton<LivePriceCache>();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────

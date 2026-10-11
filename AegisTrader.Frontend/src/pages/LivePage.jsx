@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
 import TradingChart from '../components/TradingChart';
+import MlForecastModal from '../components/MlForecastModal';
 import {
   Activity,
   BarChart2,
@@ -14,7 +15,8 @@ import {
   TrendingDown,
   CheckCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Brain,
 } from 'lucide-react';
 
 const SUPPORTED_ASSETS = [
@@ -43,6 +45,7 @@ const LivePage = () => {
   const [prevTick, setPrevTick] = useState(null);
   const [candles, setCandles] = useState([]);
   const [dbStatus, setDbStatus] = useState(null);
+  const [showMlModal, setShowMlModal] = useState(false);
   const [error, setError] = useState(null);
 
   // Client-side Paper Session Balance (user-scoped)
@@ -682,6 +685,22 @@ const LivePage = () => {
         {/* Left pane: upgraded TradingView-style chart + trade ledger */}
         <div className="flex-1 flex flex-col gap-3 min-w-0">
 
+          {/* AI Forecaster Trigger Bar */}
+          <div className="flex items-center justify-between pb-0.5">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              Live Chart Canvas · {symbol}
+            </span>
+            <button
+              onClick={() => setShowMlModal(true)}
+              id="btn-open-live-ml-forecaster"
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-indigo-900/60 hover:from-purple-800 hover:to-indigo-800 border border-purple-500/50 px-3 py-1.5 text-xs font-semibold text-purple-200 transition shadow-sm cursor-pointer"
+              title="Run AI Machine Learning Time-Series Forecaster"
+            >
+              <Brain size={13} className="text-purple-400 animate-pulse" />
+              <span>AI ML Forecaster</span>
+            </button>
+          </div>
+
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
               <TradingChart
@@ -957,6 +976,14 @@ const LivePage = () => {
         </div>
 
       </main>
+
+      {/* AI Machine Learning Forecasting Modal */}
+      <MlForecastModal
+        isOpen={showMlModal}
+        onClose={() => setShowMlModal(false)}
+        symbol={symbol}
+        timeframe={timeframe}
+      />
 
     </div>
   );

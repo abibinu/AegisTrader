@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
 import TradingChart from "../components/TradingChart";
+import MlForecastModal from "../components/MlForecastModal";
 import {
   Play,
   Pause,
@@ -19,6 +20,7 @@ import {
   BarChart2,
   LogOut,
   User,
+  Brain,
 } from "lucide-react";
 
 // ─── Small helper components ──────────────────────────────────────────────────
@@ -149,6 +151,9 @@ const ReplayPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x, 2x, 5x, 10x
   const [autoStepMins, setAutoStepMins] = useState(1);   // 1m, 5m, 15m
+
+  // AI ML Forecaster modal state
+  const [showMlModal, setShowMlModal] = useState(false);
 
   // ── API Calls ────────────────────────────────────────────────────────────────
 
@@ -661,6 +666,18 @@ const ReplayPage = () => {
                 </button>
               ))}
             </div>
+
+            {/* AI ML Forecaster Button */}
+            <button
+              onClick={() => setShowMlModal(true)}
+              disabled={!session && candles.length === 0}
+              id="btn-open-ml-forecaster"
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-900/60 to-indigo-900/60 hover:from-purple-800 hover:to-indigo-800 border border-purple-500/50 px-3 py-1.5 text-xs font-semibold text-purple-200 transition shadow-sm cursor-pointer ml-auto disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Run AI Machine Learning Time-Series Forecaster"
+            >
+              <Brain size={13} className="text-purple-400 animate-pulse" />
+              <span>AI ML Forecaster</span>
+            </button>
           </div>
 
           {/* Chart */}
@@ -869,6 +886,15 @@ const ReplayPage = () => {
           </div>
         </div>
       </main>
+
+      {/* AI Machine Learning Forecasting Modal */}
+      <MlForecastModal
+        isOpen={showMlModal}
+        onClose={() => setShowMlModal(false)}
+        sessionId={session?.id}
+        symbol={activeSymbol}
+        timeframe={timeframe}
+      />
     </div>
   );
 };

@@ -422,6 +422,14 @@ public static decimal CalculatePnL(string symbol, TradeDirection direction, deci
   - Batching: Saves candles in **2,000-row chunks** via `AddRangeAsync`, importing 100,000 candles in under 5 seconds.
   - **Synthetic Random Walk Generator:** Auto-generates 5,000 realistic historical bars with asset-specific volatilities when no CSV file is present.
 
+#### 8. `MlForecastingService.cs` (AI / Machine Learning Time-Series Engine)
+- **Functionality:**
+  - Extracts 5 statistical feature vectors (Log Returns, 14-period RSI, 20-period SMA divergence, Rolling Volatility, and Volume Momentum).
+  - Trains an in-memory **L2-Regularized Ridge Regression Estimator** via batch gradient descent with momentum ($O(N \cdot D)$ time complexity).
+  - Computes **95% Confidence Interval Envelopes** ($\pm 1.96 \times \text{StdErr}$) and directional probabilities via calibrated sigmoid activation.
+  - Computes academic out-of-sample error validation metrics: **Mean Absolute Error (MAE)**, **Root Mean Squared Error (RMSE)**, **$R^2$ Score**, and **Directional Sign Accuracy (%)**.
+  - Benchmarks sub-millisecond execution time (`InferenceLatencyMs` $< 3\text{ms}$).
+
 ---
 
 ### 4.4 RESTful API Layer: AegisTrader.API/Controllers
@@ -443,6 +451,8 @@ public static decimal CalculatePnL(string symbol, TradeDirection direction, deci
 | `TradeController` | `GET` | `/api/Trade/history/{id}`| Authorized | Retrieves trade ledger (open & closed) for a session. |
 | `TradeController` | `GET` | `/api/Trade/analytics/{id}`| Authorized | Returns comprehensive quantitative summary for a session. |
 | `SeedController` | `GET` | `/api/Seed/status` | Authorized | Returns candle counts in DB; triggers synthetic seed if empty. |
+| `MlForecastController`| `GET` | `/api/MlForecast/replay/{id}` | Anonymous | Computes zero-lookahead ML inference on current replay clock. |
+| `MlForecastController`| `GET` | `/api/MlForecast/live` | Anonymous | Computes real-time ML inference for active live paper market. |
 
 ---
 
