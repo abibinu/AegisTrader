@@ -1131,15 +1131,17 @@ const ReplayPage = () => {
       />
 
       {/* Interactive Adjust SL/TP Targets Modal */}
-      <AdjustTradeModal
-        isOpen={adjustTrade !== null && !pickingTarget}
-        trade={adjustTrade}
-        currentPrice={currentPrice}
-        symbol={activeSymbol}
-        onSave={handleAdjustTradeSave}
-        onClose={() => setAdjustTrade(null)}
-        onPickOnChart={handlePickOnChartForAdjust}
-      />
+      {adjustTrade && (
+        <AdjustTradeModal
+          isOpen={!pickingTarget}
+          trade={adjustTrade}
+          currentPrice={currentPrice}
+          symbol={activeSymbol}
+          onSave={handleAdjustTradeSave}
+          onClose={() => setAdjustTrade(null)}
+          onPickOnChart={handlePickOnChartForAdjust}
+        />
+      )}
     </div>
   );
 };

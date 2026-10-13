@@ -69,19 +69,33 @@ const LivePage = () => {
 
   // Client-side Paper Session Balance (user-scoped)
   const [balance, setBalance] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_BALANCE);
-    return saved ? Number(saved) : 10000;
+    try {
+      const saved = localStorage.getItem(STORAGE_BALANCE);
+      return saved ? Number(saved) : 10000;
+    } catch {
+      return 10000;
+    }
   });
 
   // Active trades and history (user-scoped)
   const [openTrades, setOpenTrades] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_OPEN);
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem(STORAGE_OPEN);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   });
 
   const [tradeHistory, setTradeHistory] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_HISTORY);
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem(STORAGE_HISTORY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   });
 
   // Input states
@@ -467,6 +481,10 @@ const LivePage = () => {
   // ── Trade Placement ─────────────────────────────────────────────────────────
   const placeTrade = (direction) => {
     setTradeMessage(null);
+    if (!currentTick) {
+      setTradeMessage({ type: "error", text: "Waiting for live tick feed before placing trade." });
+      return;
+    }
     const entryPrice = direction === "Buy" ? currentTick.ask : currentTick.bid;
     const lotSize = Number(lots);
 
@@ -511,7 +529,7 @@ const LivePage = () => {
     };
 
     setOpenTrades(prev => [newTrade, ...prev]);
-    setTradeMessage({ type: "success", text: `${direction} order filled at ${entryPrice.toFixed(5)}!` });
+    setTradeMessage({ type: "success", text: `${direction} order filled at ${formatPriceVal(entryPrice)}!` });
     setSl("");
     setTp("");
   };
@@ -868,11 +886,11 @@ const LivePage = () => {
                                 {t.direction === "Buy" ? "▲ BUY" : "▼ SELL"}
                               </span>
                             </td>
-                            <td className="py-2 px-3 text-slate-300">{t.lots.toFixed(2)}</td>
-                            <td className="py-2 px-3 text-slate-300">{t.entry.toFixed(5)}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.sl ? Number(t.sl).toFixed(5) : "—"}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.tp ? Number(t.tp).toFixed(5) : "—"}</td>
-                            <td className="py-2 px-3 text-slate-300">{curPrice.toFixed(5)}</td>
+                            <td className="py-2 px-3 text-slate-300">{Number(t.lots).toFixed(2)}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.entry)}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(curPrice)}</td>
                             <td className={`py-2 px-3 font-bold ${pnl >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
                               {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}
                             </td>
@@ -928,13 +946,13 @@ const LivePage = () => {
                               {t.direction === "Buy" ? "▲ BUY" : "▼ SELL"}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-slate-400">{t.lots.toFixed(2)}</td>
-                          <td className="py-2 px-3 text-slate-400">{t.entry.toFixed(5)}</td>
-                          <td className="py-2 px-3 text-slate-300">{t.exit.toFixed(5)}</td>
-                          <td className="py-2 px-3 text-slate-500">{t.sl ? t.sl.toFixed(5) : "—"}</td>
-                          <td className="py-2 px-3 text-slate-500">{t.tp ? t.tp.toFixed(5) : "—"}</td>
-                          <td className={`py-2 px-3 font-bold ${t.pnl >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
-                            {t.pnl >= 0 ? "+" : ""}{t.pnl.toFixed(2)}
+                          <td className="py-2 px-3 text-slate-400">{Number(t.lots).toFixed(2)}</td>
+                          <td className="py-2 px-3 text-slate-400">{formatPriceVal(t.entry)}</td>
+                          <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.exit)}</td>
+                          <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl) : "—"}</td>
+                          <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp) : "—"}</td>
+                          <td className={`py-2 px-3 font-bold ${Number(t.pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
+                            {Number(t.pnl ?? 0) >= 0 ? "+" : ""}{Number(t.pnl ?? 0).toFixed(2)}
                           </td>
                           <td className="py-2 px-3">
                             <span className={`flex items-center gap-1 font-bold ${t.result === "Win" ? "text-emerald-400" : "text-rose-500"}`}>
@@ -1171,19 +1189,21 @@ const LivePage = () => {
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   onClick={() => placeTrade("Buy")}
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-green-600/15 py-4 font-bold text-green-500 border border-green-600/30 hover:bg-green-600/25 transition"
+                  disabled={!currentTick}
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-green-600/15 py-4 font-bold text-green-500 border border-green-600/30 hover:bg-green-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <TrendingUp size={22} />
                   <span className="text-sm">BUY</span>
-                  <span className="text-xs font-mono text-green-700">{currentTick ? currentTick.ask.toFixed(5) : "—"}</span>
+                  <span className="text-xs font-mono text-green-700">{currentTick ? formatPriceVal(currentTick.ask) : "—"}</span>
                 </button>
                 <button
                   onClick={() => placeTrade("Sell")}
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-red-600/15 py-4 font-bold text-red-500 border border-red-600/30 hover:bg-red-600/25 transition"
+                  disabled={!currentTick}
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-red-600/15 py-4 font-bold text-red-500 border border-red-600/30 hover:bg-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <TrendingDown size={22} />
                   <span className="text-sm">SELL</span>
-                  <span className="text-xs font-mono text-red-700">{currentTick ? currentTick.bid.toFixed(5) : "—"}</span>
+                  <span className="text-xs font-mono text-red-700">{currentTick ? formatPriceVal(currentTick.bid) : "—"}</span>
                 </button>
               </div>
             </div>
@@ -1212,15 +1232,21 @@ const LivePage = () => {
       />
 
       {/* Interactive Adjust SL/TP Targets Modal */}
-      <AdjustTradeModal
-        isOpen={adjustTrade !== null && !pickingTarget}
-        trade={adjustTrade}
-        currentPrice={currentTick ? (adjustTrade.direction === "Buy" ? currentTick.bid : currentTick.ask) : Number(adjustTrade?.entry ?? 0)}
-        symbol={symbol}
-        onSave={handleAdjustTradeSave}
-        onClose={() => setAdjustTrade(null)}
-        onPickOnChart={handlePickOnChartForAdjust}
-      />
+      {adjustTrade && (
+        <AdjustTradeModal
+          isOpen={!pickingTarget}
+          trade={adjustTrade}
+          currentPrice={
+            currentTick
+              ? (adjustTrade.direction === "Buy" ? currentTick.bid : currentTick.ask)
+              : Number(adjustTrade.entry ?? 0)
+          }
+          symbol={symbol}
+          onSave={handleAdjustTradeSave}
+          onClose={() => setAdjustTrade(null)}
+          onPickOnChart={handlePickOnChartForAdjust}
+        />
+      )}
 
     </div>
   );
