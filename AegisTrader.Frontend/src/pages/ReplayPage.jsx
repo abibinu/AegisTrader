@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
 import TradingChart from "../components/TradingChart";
 import MlForecastModal from "../components/MlForecastModal";
+import AdjustTradeModal from "../components/AdjustTradeModal";
 import {
   Play,
   Pause,
@@ -21,9 +22,28 @@ import {
   LogOut,
   User,
   Brain,
+  Target,
+  Shield,
+  Sliders,
 } from "lucide-react";
 
 // ─── Small helper components ──────────────────────────────────────────────────
+
+/** Helper: Asset pip step scaling */
+const getPipStep = (sym) => {
+  const s = sym?.toUpperCase() ?? '';
+  if (s.includes('JPY')) return 0.01;
+  if (s === 'XAUUSD' || s === 'GOLD') return 0.50;
+  if (s === 'BTCUSD' || s === 'BITCOIN') return 50.0;
+  return 0.0001; // 5-decimal Forex
+};
+
+const getDecimals = (sym) => {
+  const s = sym?.toUpperCase() ?? '';
+  if (s.includes('JPY')) return 3;
+  if (s === 'XAUUSD' || s === 'BTCUSD' || s === 'GOLD') return 2;
+  return 5;
+};
 
 /** A single card in the stats bar */
 const StatCard = ({ label, value, subValue, color = "text-white", icon: Icon }) => (
@@ -38,7 +58,7 @@ const StatCard = ({ label, value, subValue, color = "text-white", icon: Icon }) 
 );
 
 /** A single row in the trade history table */
-const TradeRow = ({ trade }) => {
+const TradeRow = ({ trade, onEditTrade }) => {
   const pnlVal = Number(trade.pnl ?? trade.pnL ?? 0);
   const isWin = pnlVal > 0;
   const isOpen = trade.status === 0 || trade.status === "Open";
@@ -60,10 +80,10 @@ const TradeRow = ({ trade }) => {
         {Number(trade.entryPrice).toFixed(5)}
       </td>
       <td className="py-2 px-3 font-mono text-xs text-slate-400">
-        {Number(trade.stopLoss).toFixed(5)}
+        {trade.stopLoss ? Number(trade.stopLoss).toFixed(5) : "—"}
       </td>
       <td className="py-2 px-3 font-mono text-xs text-slate-400">
-        {Number(trade.takeProfit).toFixed(5)}
+        {trade.takeProfit ? Number(trade.takeProfit).toFixed(5) : "—"}
       </td>
       <td className="py-2 px-3">
         {isOpen ? (
@@ -81,9 +101,21 @@ const TradeRow = ({ trade }) => {
       </td>
       <td className="py-2 px-3">
         {isOpen ? (
-          <span className="flex items-center gap-1 text-xs text-blue-400">
-            <Activity size={10} className="animate-pulse" /> Live
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-xs text-blue-400">
+              <Activity size={10} className="animate-pulse" /> Live
+            </span>
+            {onEditTrade && (
+              <button
+                type="button"
+                onClick={() => onEditTrade(trade)}
+                className="px-2 py-0.5 rounded bg-blue-950/80 hover:bg-blue-900 border border-blue-700/60 text-[10px] font-bold text-blue-300 hover:text-white transition cursor-pointer"
+                title="Adjust Stop Loss / Take Profit"
+              >
+                Edit SL/TP
+              </button>
+            )}
+          </div>
         ) : isWin ? (
           <span className="flex items-center gap-1 text-xs text-green-400">
             <CheckCircle size={10} /> Win
@@ -143,6 +175,10 @@ const ReplayPage = () => {
   // Trade history state
   const [trades, setTrades] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Chart SL/TP Picking and Adjustment modal state
+  const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | null
+  const [adjustTrade, setAdjustTrade] = useState(null);     // Open trade being edited
 
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
@@ -340,6 +376,72 @@ const ReplayPage = () => {
       setTradeMessage({ type: "error", text: String(msg) });
     } finally {
       setTradeLoading(false);
+    }
+  };
+
+  const handleChartPricePick = (price, target) => {
+    const dec = getDecimals(activeSymbol);
+    const formattedPrice = Number(price).toFixed(dec);
+
+    if (adjustTrade) {
+      setAdjustTrade(prev => ({
+        ...prev,
+        [target === 'sl' ? 'stopLoss' : 'takeProfit']: formattedPrice,
+        [target === 'sl' ? 'sl' : 'tp']: formattedPrice,
+      }));
+      setPickingTarget(null);
+    } else {
+      if (target === 'sl') {
+        setSl(formattedPrice);
+      } else if (target === 'tp') {
+        setTp(formattedPrice);
+      }
+      setPickingTarget(null);
+    }
+  };
+
+  const handlePickOnChartForAdjust = (target, tradeToAdjust) => {
+    setAdjustTrade(tradeToAdjust);
+    setPickingTarget(target);
+  };
+
+  const handleAdjustTradeSave = async (tradeId, newSl, newTp) => {
+    try {
+      await client.put(`/Trade/update/${tradeId}?sl=${newSl}&tp=${newTp}`);
+      setTradeMessage({ type: "success", text: `Trade #${String(tradeId).slice(0, 4)} targets updated successfully!` });
+      await fetchTrades(session.id);
+    } catch (err) {
+      const msg = err.response?.data || "Failed to update trade targets.";
+      setTradeMessage({ type: "error", text: String(msg) });
+      throw err;
+    }
+  };
+
+  const handleNudgeInput = (target, pips) => {
+    const curVal = target === 'sl' ? sl : tp;
+    const curPriceNum = Number(currentPrice);
+    const pStep = getPipStep(activeSymbol);
+    const dec = getDecimals(activeSymbol);
+    const base = curVal ? Number(curVal) : (curPriceNum || 0);
+    const updated = base + (pips * pStep);
+    if (target === 'sl') setSl(updated.toFixed(dec));
+    else setTp(updated.toFixed(dec));
+  };
+
+  const applyPreset = (direction, slPips, tpPips) => {
+    const curPriceNum = Number(currentPrice);
+    if (!curPriceNum || isNaN(curPriceNum)) {
+      setTradeMessage({ type: "error", text: "Wait for price candle before applying preset." });
+      return;
+    }
+    const pStep = getPipStep(activeSymbol);
+    const dec = getDecimals(activeSymbol);
+    if (direction === 'Buy') {
+      setSl((curPriceNum - slPips * pStep).toFixed(dec));
+      setTp((curPriceNum + tpPips * pStep).toFixed(dec));
+    } else {
+      setSl((curPriceNum + slPips * pStep).toFixed(dec));
+      setTp((curPriceNum - tpPips * pStep).toFixed(dec));
     }
   };
 
@@ -683,7 +785,18 @@ const ReplayPage = () => {
           {/* Chart */}
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             {candles.length > 0 ? (
-              <TradingChart data={candles} trades={trades} timeframe={timeframe} symbol={activeSymbol} onTimeframeChange={handleTimeframeChange} />
+              <TradingChart
+                data={candles}
+                trades={trades}
+                timeframe={timeframe}
+                symbol={activeSymbol}
+                onTimeframeChange={handleTimeframeChange}
+                plannedSl={sl ? Number(sl) : null}
+                plannedTp={tp ? Number(tp) : null}
+                pickingTarget={pickingTarget}
+                onPricePick={handleChartPricePick}
+                onCancelPick={() => setPickingTarget(null)}
+              />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center">
@@ -738,7 +851,7 @@ const ReplayPage = () => {
                     </thead>
                     <tbody>
                       {trades.map((t) => (
-                        <TradeRow key={t.id} trade={t} />
+                        <TradeRow key={t.id} trade={t} onEditTrade={setAdjustTrade} />
                       ))}
                     </tbody>
                   </table>
@@ -765,19 +878,107 @@ const ReplayPage = () => {
               <p className="text-xs text-slate-600 mt-0.5">{activeSymbol} · 1-Minute</p>
             </div>
 
+            {/* Quick Presets Bar */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2.5 mb-3">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Sliders size={11} className="text-blue-400" />
+                  Quick Presets
+                </span>
+                <span className="text-slate-500 font-mono text-[9px]">Auto Calc</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 15, 30)}
+                  className="px-2 py-1 bg-green-950/50 hover:bg-green-900/60 border border-green-800/60 rounded text-[10px] font-bold text-green-300 transition cursor-pointer"
+                  title="BUY: 15 pips SL, 30 pips TP (1:2 R:R)"
+                >
+                  ▲ BUY 1:2 (15/30p)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Sell', 15, 30)}
+                  className="px-2 py-1 bg-red-950/50 hover:bg-red-900/60 border border-red-800/60 rounded text-[10px] font-bold text-red-300 transition cursor-pointer"
+                  title="SELL: 15 pips SL, 30 pips TP (1:2 R:R)"
+                >
+                  ▼ SELL 1:2 (15/30p)
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 10, 20)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 10 pips SL, 20 pips TP"
+                >
+                  10/20p
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 20, 40)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 20 pips SL, 40 pips TP"
+                >
+                  20/40p
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 15, 45)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 15 pips SL, 45 pips TP (1:3 R:R)"
+                >
+                  1:3 R:R
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-3">
               {/* Stop Loss */}
               <div>
-                <label className="text-xs text-slate-400 font-medium mb-1 flex items-center gap-1.5">
-                  <XCircle size={11} className="text-red-500" />
-                  Stop Loss (SL)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+                    <XCircle size={11} className="text-red-500" />
+                    Stop Loss (SL)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('sl', -1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge -1 pip"
+                    >
+                      -1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('sl', 1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge +1 pip"
+                    >
+                      +1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickingTarget(pickingTarget === 'sl' ? null : 'sl')}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                        pickingTarget === 'sl'
+                          ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                          : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-purple-400 hover:text-purple-300'
+                      }`}
+                      title="Click on chart canvas to set Stop Loss"
+                    >
+                      <Target size={10} />
+                      {pickingTarget === 'sl' ? 'Pick on Chart' : 'Chart'}
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="number"
-                  step="0.00001"
+                  step="any"
                   value={sl}
                   onChange={(e) => setSl(e.target.value)}
-                  placeholder="e.g. 1.12800"
+                  placeholder="e.g. 1.12800 or click Chart"
                   id="input-sl"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-red-600/60 transition"
                 />
@@ -785,16 +986,49 @@ const ReplayPage = () => {
 
               {/* Take Profit */}
               <div>
-                <label className="text-xs text-slate-400 font-medium mb-1 flex items-center gap-1.5">
-                  <CheckCircle size={11} className="text-green-500" />
-                  Take Profit (TP)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+                    <CheckCircle size={11} className="text-green-500" />
+                    Take Profit (TP)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('tp', -1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge -1 pip"
+                    >
+                      -1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('tp', 1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge +1 pip"
+                    >
+                      +1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickingTarget(pickingTarget === 'tp' ? null : 'tp')}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                        pickingTarget === 'tp'
+                          ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                          : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-purple-400 hover:text-purple-300'
+                      }`}
+                      title="Click on chart canvas to set Take Profit"
+                    >
+                      <Target size={10} />
+                      {pickingTarget === 'tp' ? 'Pick on Chart' : 'Chart'}
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="number"
-                  step="0.00001"
+                  step="any"
                   value={tp}
                   onChange={(e) => setTp(e.target.value)}
-                  placeholder="e.g. 1.13400"
+                  placeholder="e.g. 1.13400 or click Chart"
                   id="input-tp"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-green-600/60 transition"
                 />
@@ -894,6 +1128,17 @@ const ReplayPage = () => {
         sessionId={session?.id}
         symbol={activeSymbol}
         timeframe={timeframe}
+      />
+
+      {/* Interactive Adjust SL/TP Targets Modal */}
+      <AdjustTradeModal
+        isOpen={adjustTrade !== null && !pickingTarget}
+        trade={adjustTrade}
+        currentPrice={currentPrice}
+        symbol={activeSymbol}
+        onSave={handleAdjustTradeSave}
+        onClose={() => setAdjustTrade(null)}
+        onPickOnChart={handlePickOnChartForAdjust}
       />
     </div>
   );

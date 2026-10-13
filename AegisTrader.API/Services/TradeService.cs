@@ -35,6 +35,18 @@ public class TradeService
         return trade;
     }
 
+    // 1b. Update SL and TP of an open trade
+    public async Task<Trade?> UpdateTradeSlTp(Guid tradeId, decimal newSl, decimal newTp)
+    {
+        var trade = await _context.Trades.FindAsync(tradeId);
+        if (trade == null || trade.Status != TradeStatus.Open) return null;
+
+        trade.StopLoss = newSl;
+        trade.TakeProfit = newTp;
+        await _context.SaveChangesAsync();
+        return trade;
+    }
+
     // 2. The Overlap Constraint: Evaluate open trades against a new candle
     public async Task EvaluateOpenTrades(Guid sessionId, Candlestick candle)
     {

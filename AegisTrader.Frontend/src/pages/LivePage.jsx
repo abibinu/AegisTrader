@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
 import TradingChart from '../components/TradingChart';
 import MlForecastModal from '../components/MlForecastModal';
+import AdjustTradeModal from '../components/AdjustTradeModal';
 import {
   Activity,
   BarChart2,
@@ -17,7 +18,25 @@ import {
   XCircle,
   AlertCircle,
   Brain,
+  Target,
+  Shield,
+  Sliders,
 } from 'lucide-react';
+
+const getPipStep = (sym) => {
+  const s = sym?.toUpperCase() ?? '';
+  if (s.includes('JPY')) return 0.01;
+  if (s === 'XAUUSD' || s === 'GOLD') return 0.50;
+  if (s === 'BTCUSD' || s === 'BITCOIN') return 50.0;
+  return 0.0001;
+};
+
+const getDecimals = (sym) => {
+  const s = sym?.toUpperCase() ?? '';
+  if (s.includes('JPY')) return 3;
+  if (s === 'XAUUSD' || s === 'BTCUSD' || s === 'GOLD') return 2;
+  return 5;
+};
 
 const SUPPORTED_ASSETS = [
   { symbol: 'EURUSD', name: 'EUR/USD · Euro', type: 'Major Forex' },
@@ -71,6 +90,10 @@ const LivePage = () => {
   const [lots, setLots] = useState("0.1");
   const [tradeMessage, setTradeMessage] = useState(null);
   const [showHistory, setShowHistory] = useState(true);
+
+  // Chart SL/TP Picking and Adjustment modal state
+  const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | null
+  const [adjustTrade, setAdjustTrade] = useState(null);     // Active trade being edited
 
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
@@ -522,6 +545,73 @@ const LivePage = () => {
     setTimeout(() => processingTradeIds.current.delete(id), 2000);
   };
 
+  const handleChartPricePick = (price, target) => {
+    const dec = getDecimals(symbol);
+    const formattedPrice = Number(price).toFixed(dec);
+
+    if (adjustTrade) {
+      setAdjustTrade(prev => ({
+        ...prev,
+        [target === 'sl' ? 'sl' : 'tp']: Number(formattedPrice),
+      }));
+      setPickingTarget(null);
+    } else {
+      if (target === 'sl') {
+        setSl(formattedPrice);
+      } else if (target === 'tp') {
+        setTp(formattedPrice);
+      }
+      setPickingTarget(null);
+    }
+  };
+
+  const handlePickOnChartForAdjust = (target, tradeToAdjust) => {
+    setAdjustTrade(tradeToAdjust);
+    setPickingTarget(target);
+  };
+
+  const handleAdjustTradeSave = async (tradeId, newSl, newTp) => {
+    setOpenTrades(prev => prev.map(t => {
+      if (t.id === tradeId) {
+        return {
+          ...t,
+          sl: Number(newSl),
+          tp: Number(newTp),
+        };
+      }
+      return t;
+    }));
+    setTradeMessage({ type: "success", text: `Active position targets updated!` });
+  };
+
+  const handleNudgeInput = (target, pips) => {
+    const curVal = target === 'sl' ? sl : tp;
+    const curPriceNum = currentTick ? (target === 'sl' ? currentTick.bid : currentTick.ask) : 0;
+    const pStep = getPipStep(symbol);
+    const dec = getDecimals(symbol);
+    const base = curVal ? Number(curVal) : curPriceNum;
+    const updated = base + (pips * pStep);
+    if (target === 'sl') setSl(updated.toFixed(dec));
+    else setTp(updated.toFixed(dec));
+  };
+
+  const applyPreset = (direction, slPips, tpPips) => {
+    if (!currentTick) {
+      setTradeMessage({ type: "error", text: "Waiting for live tick feed before applying preset." });
+      return;
+    }
+    const basePrice = direction === 'Buy' ? currentTick.ask : currentTick.bid;
+    const pStep = getPipStep(symbol);
+    const dec = getDecimals(symbol);
+    if (direction === 'Buy') {
+      setSl((basePrice - slPips * pStep).toFixed(dec));
+      setTp((basePrice + tpPips * pStep).toFixed(dec));
+    } else {
+      setSl((basePrice + slPips * pStep).toFixed(dec));
+      setTp((basePrice - tpPips * pStep).toFixed(dec));
+    }
+  };
+
   const resetSession = () => {
     setBalance(10000);
     setOpenTrades([]);
@@ -709,6 +799,11 @@ const LivePage = () => {
                 timeframe={timeframe}
                 symbol={symbol}
                 onTimeframeChange={handleLiveTimeframeChange}
+                plannedSl={sl ? Number(sl) : null}
+                plannedTp={tp ? Number(tp) : null}
+                pickingTarget={pickingTarget}
+                onPricePick={handleChartPricePick}
+                onCancelPick={() => setPickingTarget(null)}
               />
             ) : (
               <div className="h-[520px] flex flex-col items-center justify-center gap-4">
@@ -775,19 +870,29 @@ const LivePage = () => {
                             </td>
                             <td className="py-2 px-3 text-slate-300">{t.lots.toFixed(2)}</td>
                             <td className="py-2 px-3 text-slate-300">{t.entry.toFixed(5)}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.sl ? t.sl.toFixed(5) : "—"}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.tp ? t.tp.toFixed(5) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.sl ? Number(t.sl).toFixed(5) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.tp ? Number(t.tp).toFixed(5) : "—"}</td>
                             <td className="py-2 px-3 text-slate-300">{curPrice.toFixed(5)}</td>
                             <td className={`py-2 px-3 font-bold ${pnl >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
                               {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}
                             </td>
                             <td className="py-2 px-3 text-right">
-                              <button
-                                onClick={() => closeTradeManually(t.id)}
-                                className="bg-slate-800 border border-slate-700 hover:bg-red-650 hover:border-red-900 text-[10px] font-semibold text-slate-300 hover:text-white px-2 py-1 rounded transition"
-                              >
-                                CLOSE
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setAdjustTrade(t)}
+                                  className="bg-blue-950/80 border border-blue-700/60 hover:bg-blue-900 text-[10px] font-semibold text-blue-300 hover:text-white px-2 py-1 rounded transition cursor-pointer"
+                                  title="Adjust SL and TP targets"
+                                >
+                                  Edit SL/TP
+                                </button>
+                                <button
+                                  onClick={() => closeTradeManually(t.id)}
+                                  className="bg-slate-800 border border-slate-700 hover:bg-red-650 hover:border-red-900 text-[10px] font-semibold text-slate-300 hover:text-white px-2 py-1 rounded transition cursor-pointer"
+                                >
+                                  CLOSE
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -868,35 +973,156 @@ const LivePage = () => {
               </div>
             </div>
 
+            {/* Quick Presets Bar */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-2.5 mb-3">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Sliders size={11} className="text-emerald-400" />
+                  Quick Presets
+                </span>
+                <span className="text-slate-500 font-mono text-[9px]">Auto Calc</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 15, 30)}
+                  className="px-2 py-1 bg-green-950/50 hover:bg-green-900/60 border border-green-800/60 rounded text-[10px] font-bold text-green-300 transition cursor-pointer"
+                  title="BUY: 15 pips SL, 30 pips TP (1:2 R:R)"
+                >
+                  ▲ BUY 1:2 (15/30p)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Sell', 15, 30)}
+                  className="px-2 py-1 bg-red-950/50 hover:bg-red-900/60 border border-red-800/60 rounded text-[10px] font-bold text-red-300 transition cursor-pointer"
+                  title="SELL: 15 pips SL, 30 pips TP (1:2 R:R)"
+                >
+                  ▼ SELL 1:2 (15/30p)
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 10, 20)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 10 pips SL, 20 pips TP"
+                >
+                  10/20p
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 20, 40)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 20 pips SL, 40 pips TP"
+                >
+                  20/40p
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPreset('Buy', 15, 45)}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-300 transition cursor-pointer text-center"
+                  title="BUY: 15 pips SL, 45 pips TP (1:3 R:R)"
+                >
+                  1:3 R:R
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-3">
               {/* Stop Loss input */}
               <div>
-                <label className="text-xs text-slate-400 font-medium mb-1 flex items-center gap-1.5">
-                  <XCircle size={11} className="text-rose-500" />
-                  Stop Loss (SL)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+                    <XCircle size={11} className="text-rose-500" />
+                    Stop Loss (SL)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('sl', -1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge -1 pip"
+                    >
+                      -1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('sl', 1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge +1 pip"
+                    >
+                      +1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickingTarget(pickingTarget === 'sl' ? null : 'sl')}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                        pickingTarget === 'sl'
+                          ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                          : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-purple-400 hover:text-purple-300'
+                      }`}
+                      title="Click on chart canvas to set Stop Loss"
+                    >
+                      <Target size={10} />
+                      {pickingTarget === 'sl' ? 'Pick on Chart' : 'Chart'}
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="number"
-                  step={symbol.includes('JPY') ? "0.001" : (symbol === "XAUUSD" || symbol === "BTCUSD" ? "0.01" : "0.00001")}
+                  step="any"
                   value={sl}
                   onChange={(e) => setSl(e.target.value)}
-                  placeholder={`e.g. ${symbol.includes('JPY') ? '154.000' : symbol === 'XAUUSD' ? '2640.00' : symbol === 'BTCUSD' ? '68000.00' : '1.08200'}`}
+                  placeholder={`e.g. ${symbol.includes('JPY') ? '154.000' : symbol === 'XAUUSD' ? '2640.00' : symbol === 'BTCUSD' ? '68000.00' : '1.08200'} or click Chart`}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-650 focus:outline-none focus:border-rose-600/60 transition"
                 />
               </div>
 
               {/* Take Profit input */}
               <div>
-                <label className="text-xs text-slate-400 font-medium mb-1 flex items-center gap-1.5">
-                  <CheckCircle size={11} className="text-emerald-500" />
-                  Take Profit (TP)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+                    <CheckCircle size={11} className="text-emerald-500" />
+                    Take Profit (TP)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('tp', -1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge -1 pip"
+                    >
+                      -1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNudgeInput('tp', 1)}
+                      className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                      title="Nudge +1 pip"
+                    >
+                      +1p
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickingTarget(pickingTarget === 'tp' ? null : 'tp')}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                        pickingTarget === 'tp'
+                          ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                          : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-purple-400 hover:text-purple-300'
+                      }`}
+                      title="Click on chart canvas to set Take Profit"
+                    >
+                      <Target size={10} />
+                      {pickingTarget === 'tp' ? 'Pick on Chart' : 'Chart'}
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="number"
-                  step={symbol.includes('JPY') ? "0.001" : (symbol === "XAUUSD" || symbol === "BTCUSD" ? "0.01" : "0.00001")}
+                  step="any"
                   value={tp}
                   onChange={(e) => setTp(e.target.value)}
-                  placeholder={`e.g. ${symbol.includes('JPY') ? '155.500' : symbol === 'XAUUSD' ? '2665.00' : symbol === 'BTCUSD' ? '69200.00' : '1.09200'}`}
+                  placeholder={`e.g. ${symbol.includes('JPY') ? '155.500' : symbol === 'XAUUSD' ? '2665.00' : symbol === 'BTCUSD' ? '69200.00' : '1.09200'} or click Chart`}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-650 focus:outline-none focus:border-emerald-600/60 transition"
                 />
               </div>
@@ -983,6 +1209,17 @@ const LivePage = () => {
         onClose={() => setShowMlModal(false)}
         symbol={symbol}
         timeframe={timeframe}
+      />
+
+      {/* Interactive Adjust SL/TP Targets Modal */}
+      <AdjustTradeModal
+        isOpen={adjustTrade !== null && !pickingTarget}
+        trade={adjustTrade}
+        currentPrice={currentTick ? (adjustTrade.direction === "Buy" ? currentTick.bid : currentTick.ask) : Number(adjustTrade?.entry ?? 0)}
+        symbol={symbol}
+        onSave={handleAdjustTradeSave}
+        onClose={() => setAdjustTrade(null)}
+        onPickOnChart={handlePickOnChartForAdjust}
       />
 
     </div>

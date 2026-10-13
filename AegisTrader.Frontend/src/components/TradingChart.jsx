@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, createSeriesMarkers } from 'lightweight-charts';
-import { Globe } from 'lucide-react';
+import { Globe, Target } from 'lucide-react';
 
 /**
  * Premium TradingChart component using Lightweight Charts v5.
@@ -44,7 +44,18 @@ const formatPriceDynamic = (val, sym) => {
     return num.toFixed(5);
 };
 
-const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, symbol = 'EURUSD' }) => {
+const TradingChart = ({
+    data,
+    trades = [],
+    timeframe = 1,
+    onTimeframeChange,
+    symbol = 'EURUSD',
+    plannedSl = null,
+    plannedTp = null,
+    pickingTarget = null, // 'sl' | 'tp' | null
+    onPricePick = null,
+    onCancelPick = null,
+}) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
@@ -54,6 +65,12 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, sym
     const priceLinesRef = useRef([]);
     const initialScrollDoneRef = useRef(false);
     const prevTimeframeRef = useRef(timeframe);
+
+    const pickingTargetRef = useRef(pickingTarget);
+    pickingTargetRef.current = pickingTarget;
+
+    const onPricePickRef = useRef(onPricePick);
+    onPricePickRef.current = onPricePick;
 
     // Toggle for Kill Zone session visual overlay
     const [showKillZones, setShowKillZones] = useState(true);
@@ -181,6 +198,16 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, sym
             }
         });
 
+        // Click subscription to pick SL / TP coordinates directly from chart
+        chart.subscribeClick((param) => {
+            if (pickingTargetRef.current && onPricePickRef.current && param.point && seriesRef.current) {
+                const price = seriesRef.current.coordinateToPrice(param.point.y);
+                if (price !== null && !isNaN(price)) {
+                    onPricePickRef.current(price, pickingTargetRef.current);
+                }
+            }
+        });
+
         return () => {
             resizeObserver.disconnect();
             chart.remove();
@@ -271,52 +298,6 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, sym
             });
         }
 
-        // Price lines for open trades
-        if (priceLinesRef.current) {
-            priceLinesRef.current.forEach(line => {
-                try {
-                    seriesRef.current.removePriceLine(line);
-                } catch (e) {
-                    console.error("Failed to remove price line:", e);
-                }
-            });
-            priceLinesRef.current = [];
-        }
-
-        if (trades && trades.length > 0) {
-            trades.forEach(t => {
-                const isOpen = t.status === 0 || t.status === 'Open' || t.Status === 0 || t.Status === 'Open' || t.Status === 'open' || t.status === 'open';
-                if (isOpen) {
-                    const stopLoss = Number(t.sl ?? t.StopLoss ?? t.stopLoss ?? 0);
-                    const takeProfit = Number(t.tp ?? t.TakeProfit ?? t.takeProfit ?? 0);
-
-                    if (stopLoss > 0) {
-                        const slLine = seriesRef.current.createPriceLine({
-                            price: stopLoss,
-                            color: '#ef4444',
-                            lineWidth: 1,
-                            lineStyle: 1,
-                            axisLabelVisible: true,
-                            title: `SL: ${formatPriceDynamic(stopLoss, symbol)}`,
-                        });
-                        priceLinesRef.current.push(slLine);
-                    }
-
-                    if (takeProfit > 0) {
-                        const tpLine = seriesRef.current.createPriceLine({
-                            price: takeProfit,
-                            color: '#10b981',
-                            lineWidth: 1,
-                            lineStyle: 1,
-                            axisLabelVisible: true,
-                            title: `TP: ${formatPriceDynamic(takeProfit, symbol)}`,
-                        });
-                        priceLinesRef.current.push(tpLine);
-                    }
-                }
-            });
-        }
-
         // Execution markers
         if (markersApiRef.current) {
             if (trades && trades.length > 0) {
@@ -380,6 +361,113 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, sym
         }
 
     }, [data, trades, timeframe, symbol]);
+
+    // Effect 3: Price lines for open positions and pre-trade planned SL / TP
+    useEffect(() => {
+        if (!seriesRef.current) return;
+
+        // Clean up previous price lines
+        priceLinesRef.current.forEach(line => {
+            try {
+                seriesRef.current?.removePriceLine(line);
+            } catch (e) {
+                // series might already be disposed
+            }
+        });
+        priceLinesRef.current = [];
+
+        // 1. Draw price lines for active open trades
+        if (trades && trades.length > 0) {
+            const openTrades = trades.filter(t => t.status === 0 || t.status === 'Open');
+            openTrades.forEach(t => {
+                const isBuy = t.direction === 0 || t.direction === 'Buy';
+                const tradeShortId = (t.id ? String(t.id).slice(0, 4) : '');
+
+                // Entry price line
+                const entryVal = Number(t.entryPrice ?? t.EntryPrice ?? t.entry);
+                if (!isNaN(entryVal) && entryVal > 0) {
+                    const entryLine = seriesRef.current.createPriceLine({
+                        price: entryVal,
+                        color: '#3b82f6',
+                        lineWidth: 1,
+                        lineStyle: 2, // Dashed
+                        axisLabelVisible: true,
+                        title: `${isBuy ? 'BUY' : 'SELL'} #${tradeShortId}`,
+                    });
+                    priceLinesRef.current.push(entryLine);
+                }
+
+                // Stop Loss price line
+                const slVal = Number(t.stopLoss ?? t.StopLoss ?? t.sl);
+                if (!isNaN(slVal) && slVal > 0) {
+                    const slLine = seriesRef.current.createPriceLine({
+                        price: slVal,
+                        color: '#ef4444',
+                        lineWidth: 1.5,
+                        lineStyle: 0, // Solid
+                        axisLabelVisible: true,
+                        title: `SL #${tradeShortId}`,
+                    });
+                    priceLinesRef.current.push(slLine);
+                }
+
+                // Take Profit price line
+                const tpVal = Number(t.takeProfit ?? t.TakeProfit ?? t.tp);
+                if (!isNaN(tpVal) && tpVal > 0) {
+                    const tpLine = seriesRef.current.createPriceLine({
+                        price: tpVal,
+                        color: '#10b981',
+                        lineWidth: 1.5,
+                        lineStyle: 0, // Solid
+                        axisLabelVisible: true,
+                        title: `TP #${tradeShortId}`,
+                    });
+                    priceLinesRef.current.push(tpLine);
+                }
+            });
+        }
+
+        // 2. Draw pre-trade planned Stop Loss line
+        if (plannedSl !== null && plannedSl !== undefined && plannedSl !== '') {
+            const pSl = Number(plannedSl);
+            if (!isNaN(pSl) && pSl > 0) {
+                const pSlLine = seriesRef.current.createPriceLine({
+                    price: pSl,
+                    color: '#f43f5e',
+                    lineWidth: 2,
+                    lineStyle: 1, // Dotted
+                    axisLabelVisible: true,
+                    title: 'PLANNED SL',
+                });
+                priceLinesRef.current.push(pSlLine);
+            }
+        }
+
+        // 3. Draw pre-trade planned Take Profit line
+        if (plannedTp !== null && plannedTp !== undefined && plannedTp !== '') {
+            const pTp = Number(plannedTp);
+            if (!isNaN(pTp) && pTp > 0) {
+                const pTpLine = seriesRef.current.createPriceLine({
+                    price: pTp,
+                    color: '#10b981',
+                    lineWidth: 2,
+                    lineStyle: 1, // Dotted
+                    axisLabelVisible: true,
+                    title: 'PLANNED TP',
+                });
+                priceLinesRef.current.push(pTpLine);
+            }
+        }
+
+        return () => {
+            priceLinesRef.current.forEach(line => {
+                try {
+                    seriesRef.current?.removePriceLine(line);
+                } catch (e) {}
+            });
+            priceLinesRef.current = [];
+        };
+    }, [trades, plannedSl, plannedTp, symbol]);
 
     return (
         <div className="relative w-full rounded-xl overflow-hidden bg-[#090d16] border border-slate-800">
@@ -447,10 +535,27 @@ const TradingChart = ({ data, trades = [], timeframe = 1, onTimeframeChange, sym
                 </div>
             </div>
 
+            {/* Interactive Target Picking Banner */}
+            {pickingTarget && (
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 bg-purple-950/95 border border-purple-500/80 px-4 py-2 rounded-xl shadow-2xl backdrop-blur-md animate-pulse">
+                    <Target size={15} className="text-purple-300" />
+                    <span className="text-xs font-bold text-white tracking-wide">
+                        Click on chart canvas to set {pickingTarget === 'sl' ? 'Stop Loss (SL)' : 'Take Profit (TP)'}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => onCancelPick && onCancelPick()}
+                        className="text-[11px] font-bold text-purple-200 hover:text-white bg-purple-900/80 px-2 py-0.5 rounded cursor-pointer ml-2"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            )}
+
             {/* TradingView Lightweight Charts target container */}
             <div
                 ref={chartContainerRef}
-                className="w-full"
+                className="w-full relative"
                 id="trading-chart-container"
             />
         </div>

@@ -12,9 +12,6 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
-// Note: Bearer security UI config requires Microsoft.OpenApi v2 types which
-// conflict with Swashbuckle v10 in .NET 10. We keep Swagger simple here —
-// auth testing is done via the React frontend or Postman.
 builder.Services.AddSwaggerGen();
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -23,16 +20,6 @@ builder.Services.AddDbContext<AegisDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 // ── JWT Authentication ────────────────────────────────────────────────────────
-// LEARNING: This registers the JWT Bearer middleware. When a request arrives
-// with an "Authorization: Bearer eyJ..." header, this middleware:
-//   1. Parses the token
-//   2. Validates the signature using our secret key
-//   3. Checks the expiry date
-//   4. Populates HttpContext.User with the Claims from the token
-//
-// If validation fails, the request is automatically rejected with 401.
-// If we DON'T call UseAuthentication(), the [Authorize] attribute does nothing.
-
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -74,11 +61,6 @@ builder.Services.AddCors(options =>
 // ── Build & Configure Middleware Pipeline ─────────────────────────────────────
 var app = builder.Build();
 
-// LEARNING: Middleware ORDER matters in ASP.NET Core.
-// The request passes through each middleware in the order they're added.
-// CORS must come before Auth so preflight OPTIONS requests are handled first.
-// Authentication must come before Authorization.
-
 app.UseCors("AllowAll");
 
 app.UseSwagger();
@@ -96,10 +78,6 @@ if (!app.Environment.IsDevelopment())
 // Health check — anonymous, no auth needed
 app.MapGet("/", () => "AegisTrader API is running ✅");
 
-// ── CRITICAL ORDER: Authentication → Authorization ────────────────────────────
-// UseAuthentication() reads the JWT and populates User claims.
-// UseAuthorization() then checks those claims against [Authorize] attributes.
-// Swapping these two will break auth silently.
 app.UseAuthentication();
 app.UseAuthorization();
 

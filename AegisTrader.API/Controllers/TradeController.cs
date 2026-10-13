@@ -49,6 +49,15 @@ public class TradeController : ControllerBase
         return Ok(trade);
     }
 
+    [AllowAnonymous]
+    [HttpPut("update/{tradeId:guid}")]
+    public async Task<IActionResult> UpdateTrade(Guid tradeId, [FromQuery] decimal sl, [FromQuery] decimal tp)
+    {
+        var updated = await _tradeService.UpdateTradeSlTp(tradeId, sl, tp);
+        if (updated == null) return NotFound("Open trade not found or already closed.");
+        return Ok(updated);
+    }
+
     [HttpGet("history/{sessionId}")]
     public async Task<IActionResult> GetTradeHistory(Guid sessionId)
     {
