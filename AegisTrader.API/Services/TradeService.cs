@@ -36,13 +36,45 @@ public class TradeService
     }
 
     // 1b. Update SL and TP of an open trade
-    public async Task<Trade?> UpdateTradeSlTp(Guid tradeId, decimal newSl, decimal newTp)
+    public async Task<Trade?> UpdateTradeSlTp(Guid tradeId, decimal? newSl, decimal? newTp)
     {
         var trade = await _context.Trades.FindAsync(tradeId);
         if (trade == null || trade.Status != TradeStatus.Open) return null;
 
-        trade.StopLoss = newSl;
-        trade.TakeProfit = newTp;
+        if (newSl.HasValue && newSl.Value > 0)
+            trade.StopLoss = newSl.Value;
+        if (newTp.HasValue && newTp.Value > 0)
+            trade.TakeProfit = newTp.Value;
+
+        await _context.SaveChangesAsync();
+        return trade;
+    }
+
+    // 1c. Manually close an open trade at the current replay market price
+    public async Task<Trade?> ManualCloseTrade(Guid tradeId)
+    {
+        var trade = await _context.Trades.FindAsync(tradeId);
+        if (trade == null || trade.Status != TradeStatus.Open) return null;
+
+        var session = await _context.TradingSessions.FindAsync(trade.SessionId);
+        decimal exitPrice = trade.EntryPrice;
+        DateTime closeTime = DateTime.UtcNow;
+
+        if (session != null)
+        {
+            var lastCandle = await _context.Candlesticks
+                .Where(c => c.Symbol == session.Symbol && c.Timestamp <= session.CurrentReplayTimestamp)
+                .OrderByDescending(c => c.Timestamp)
+                .FirstOrDefaultAsync();
+
+            if (lastCandle != null)
+            {
+                exitPrice = lastCandle.Close;
+                closeTime = lastCandle.Timestamp;
+            }
+        }
+
+        CloseTrade(trade, exitPrice, closeTime, session);
         await _context.SaveChangesAsync();
         return trade;
     }

@@ -51,11 +51,20 @@ public class TradeController : ControllerBase
 
     [AllowAnonymous]
     [HttpPut("update/{tradeId:guid}")]
-    public async Task<IActionResult> UpdateTrade(Guid tradeId, [FromQuery] decimal sl, [FromQuery] decimal tp)
+    public async Task<IActionResult> UpdateTrade(Guid tradeId, [FromQuery] decimal? sl = null, [FromQuery] decimal? tp = null)
     {
         var updated = await _tradeService.UpdateTradeSlTp(tradeId, sl, tp);
         if (updated == null) return NotFound("Open trade not found or already closed.");
         return Ok(updated);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("close/{tradeId:guid}")]
+    public async Task<IActionResult> CloseTrade(Guid tradeId)
+    {
+        var closed = await _tradeService.ManualCloseTrade(tradeId);
+        if (closed == null) return NotFound("Open trade not found or already closed.");
+        return Ok(closed);
     }
 
     [HttpGet("history/{sessionId}")]

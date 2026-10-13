@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
@@ -45,6 +45,29 @@ const getDecimals = (sym) => {
   return 5;
 };
 
+const calculatePnL = (direction, entry, exit, lotSize, sym) => {
+  const s = sym?.toUpperCase() ?? 'EURUSD';
+  let pips = 0;
+  let pipValue = 10;
+  const isBuy = direction === 0 || direction === "Buy";
+  const priceDiff = isBuy ? (exit - entry) : (entry - exit);
+
+  if (s.includes("JPY")) {
+    pips = priceDiff * 100;
+    pipValue = 10;
+  } else if (s === "XAUUSD" || s === "GOLD") {
+    pips = priceDiff * 10;
+    pipValue = 10;
+  } else if (s === "BTCUSD" || s === "BITCOIN") {
+    pips = priceDiff;
+    pipValue = 1;
+  } else {
+    pips = priceDiff * 10000;
+    pipValue = 10;
+  }
+  return pips * lotSize * pipValue;
+};
+
 /** A single card in the stats bar */
 const StatCard = ({ label, value, subValue, color = "text-white", icon: Icon }) => (
   <div className="flex items-center gap-3 bg-slate-900 rounded-xl px-4 py-3 border border-slate-800">
@@ -58,7 +81,7 @@ const StatCard = ({ label, value, subValue, color = "text-white", icon: Icon }) 
 );
 
 /** A single row in the trade history table */
-const TradeRow = ({ trade, onEditTrade }) => {
+const TradeRow = ({ trade, onEditTrade, onBreakEvenTrade }) => {
   const pnlVal = Number(trade.pnl ?? trade.pnL ?? 0);
   const isWin = pnlVal > 0;
   const isOpen = trade.status === 0 || trade.status === "Open";
@@ -101,10 +124,20 @@ const TradeRow = ({ trade, onEditTrade }) => {
       </td>
       <td className="py-2 px-3">
         {isOpen ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="flex items-center gap-1 text-xs text-blue-400">
               <Activity size={10} className="animate-pulse" /> Live
             </span>
+            {onBreakEvenTrade && (
+              <button
+                type="button"
+                onClick={() => onBreakEvenTrade(trade)}
+                className="px-1.5 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-700/60 text-[10px] font-bold text-amber-300 hover:text-white transition cursor-pointer"
+                title="Snap SL to entry price (Break-Even)"
+              >
+                ⚡ BE
+              </button>
+            )}
             {onEditTrade && (
               <button
                 type="button"
@@ -175,6 +208,7 @@ const ReplayPage = () => {
   // Trade history state
   const [trades, setTrades] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const prevOpenCountRef = useRef(0);
 
   // Chart SL/TP Picking and Adjustment modal state
   const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | null
@@ -213,7 +247,19 @@ const ReplayPage = () => {
   const fetchTrades = useCallback(async (sessionId) => {
     try {
       const res = await client.get(`/Trade/history/${sessionId}`);
-      setTrades(res.data);
+      const fetched = res.data || [];
+      setTrades(fetched);
+      const openCount = fetched.filter(t => t.status === 0 || t.status === "Open").length;
+      if (prevOpenCountRef.current > 0 && openCount < prevOpenCountRef.current) {
+        // Trade closed (SL or TP hit!)
+        setSl("");
+        setTp("");
+        setActiveEditSl("");
+        setActiveEditTp("");
+        setPickingTarget(null);
+        setAdjustTrade(null);
+      }
+      prevOpenCountRef.current = openCount;
     } catch (err) {
       console.error("Failed to fetch trades:", err);
     }
@@ -316,6 +362,10 @@ const ReplayPage = () => {
       }));
       await fetchCandles(session.id, timeframe);
       await fetchTrades(session.id);
+      // Clean up pre-trade planned targets if an open trade hit SL or TP
+      setSl("");
+      setTp("");
+      setPickingTarget(null);
     } catch (err) {
       console.error("Step failed:", err);
       setError("Step forward failed.");
@@ -346,13 +396,6 @@ const ReplayPage = () => {
 
   // ── Trade Execution ─────────────────────────────────────────────────────────
 
-  /**
-   * LEARNING: The TradeController expects query parameters:
-   *   POST /api/Trade/open?sessionId=...&direction=Buy&sl=...&tp=...&lots=...
-   *
-   * The `direction` must match the C# enum name exactly: "Buy" or "Sell"
-   * because ASP.NET Core's model binding parses enum by name.
-   */
   const placeTrade = async (direction) => {
     if (!session) {
       setTradeMessage({ type: "error", text: "Start a session first." });
@@ -370,6 +413,10 @@ const ReplayPage = () => {
         `/Trade/open?sessionId=${session.id}&direction=${direction}&sl=${sl}&tp=${tp}&lots=${lots}`
       );
       setTradeMessage({ type: "success", text: `${direction} order placed at market!` });
+      // Clear planned SL/TP marks immediately when trade is placed!
+      setSl("");
+      setTp("");
+      setPickingTarget(null);
       await fetchTrades(session.id);
     } catch (err) {
       const msg = err.response?.data || "Trade placement failed.";
@@ -379,6 +426,82 @@ const ReplayPage = () => {
     }
   };
 
+  const closeTrade = async (id) => {
+    if (!session) return;
+    try {
+      await client.post(`/Trade/close/${id}`);
+      await fetchTrades(session.id);
+      setTradeMessage({ type: "success", text: "Trade closed at market price!" });
+      setSl("");
+      setTp("");
+      setActiveEditSl("");
+      setActiveEditTp("");
+      setPickingTarget(null);
+      setAdjustTrade(null);
+    } catch (err) {
+      console.error("Failed to close trade:", err);
+      setTradeMessage({ type: "error", text: "Failed to close trade." });
+    }
+  };
+
+  // Active trade direct adjustment states (for right-hand management card)
+  const [activeEditSl, setActiveEditSl] = useState("");
+  const [activeEditTp, setActiveEditTp] = useState("");
+
+  const openTrades = trades.filter(t => t.status === 0 || t.status === "Open");
+
+  useEffect(() => {
+    if (openTrades.length > 0) {
+      const topTrade = openTrades[0];
+      const dec = getDecimals(activeSymbol);
+      const curSl = topTrade.stopLoss ?? topTrade.StopLoss;
+      const curTp = topTrade.takeProfit ?? topTrade.TakeProfit;
+      setActiveEditSl(curSl ? Number(curSl).toFixed(dec) : "");
+      setActiveEditTp(curTp ? Number(curTp).toFixed(dec) : "");
+    } else {
+      setActiveEditSl("");
+      setActiveEditTp("");
+    }
+  }, [trades, activeSymbol]);
+
+  const handleNudgeActive = (target, pips) => {
+    if (openTrades.length === 0) return;
+    const curVal = target === 'sl' ? activeEditSl : activeEditTp;
+    const curPriceNum = Number(currentPrice);
+    const pStep = getPipStep(activeSymbol);
+    const dec = getDecimals(activeSymbol);
+    const base = curVal ? Number(curVal) : (curPriceNum || 0);
+    const updated = base + (pips * pStep);
+    if (target === 'sl') setActiveEditSl(updated.toFixed(dec));
+    else setActiveEditTp(updated.toFixed(dec));
+  };
+
+  const handleMoveActiveToBreakEven = async (tradeToSnap = null) => {
+    const targetTrade = tradeToSnap || openTrades[0];
+    if (!targetTrade) return;
+    const dec = getDecimals(activeSymbol);
+    const entryFormatted = Number(targetTrade.entryPrice).toFixed(dec);
+    setActiveEditSl(entryFormatted);
+    if (tradeToSnap) {
+      const curTp = targetTrade.takeProfit ?? targetTrade.TakeProfit;
+      await handleAdjustTradeSave(targetTrade.id, entryFormatted, curTp);
+    }
+  };
+
+  const handleSaveActiveTargets = async () => {
+    if (openTrades.length === 0) return;
+    const primary = openTrades[0];
+    const slNum = activeEditSl ? Number(activeEditSl) : null;
+    const tpNum = activeEditTp ? Number(activeEditTp) : null;
+
+    if (!slNum && !tpNum) {
+      setTradeMessage({ type: "error", text: "Please enter valid SL or TP numbers." });
+      return;
+    }
+
+    await handleAdjustTradeSave(primary.id, slNum, tpNum);
+  };
+
   const handleChartPricePick = (price, target) => {
     const dec = getDecimals(activeSymbol);
     const formattedPrice = Number(price).toFixed(dec);
@@ -386,9 +509,18 @@ const ReplayPage = () => {
     if (adjustTrade) {
       setAdjustTrade(prev => ({
         ...prev,
-        [target === 'sl' ? 'stopLoss' : 'takeProfit']: formattedPrice,
-        [target === 'sl' ? 'sl' : 'tp']: formattedPrice,
+        stopLoss: target === 'sl' ? Number(formattedPrice) : prev?.stopLoss,
+        takeProfit: target === 'tp' ? Number(formattedPrice) : prev?.takeProfit,
+        sl: target === 'sl' ? Number(formattedPrice) : prev?.sl,
+        tp: target === 'tp' ? Number(formattedPrice) : prev?.tp,
       }));
+      setPickingTarget(null);
+    } else if (openTrades.length > 0 && (target === 'active_sl' || target === 'active_tp' || pickingTarget === 'active_sl' || pickingTarget === 'active_tp')) {
+      if (target === 'active_sl' || pickingTarget === 'active_sl') {
+        setActiveEditSl(formattedPrice);
+      } else {
+        setActiveEditTp(formattedPrice);
+      }
       setPickingTarget(null);
     } else {
       if (target === 'sl') {
@@ -407,7 +539,10 @@ const ReplayPage = () => {
 
   const handleAdjustTradeSave = async (tradeId, newSl, newTp) => {
     try {
-      await client.put(`/Trade/update/${tradeId}?sl=${newSl}&tp=${newTp}`);
+      const params = new URLSearchParams();
+      if (newSl !== null && newSl !== undefined && newSl !== '') params.append('sl', newSl);
+      if (newTp !== null && newTp !== undefined && newTp !== '') params.append('tp', newTp);
+      await client.put(`/Trade/update/${tradeId}?${params.toString()}`);
       setTradeMessage({ type: "success", text: `Trade #${String(tradeId).slice(0, 4)} targets updated successfully!` });
       await fetchTrades(session.id);
     } catch (err) {
@@ -466,7 +601,6 @@ const ReplayPage = () => {
 
   // Calculate live floating P&L of open trades
   const currentPriceNum = Number(currentPrice);
-  const openTrades = trades.filter((t) => t.status === 0 || t.status === "Open");
   
   const floatingPnL = openTrades.reduce((sum, t) => {
     if (isNaN(currentPriceNum)) return sum;
@@ -851,7 +985,12 @@ const ReplayPage = () => {
                     </thead>
                     <tbody>
                       {trades.map((t) => (
-                        <TradeRow key={t.id} trade={t} onEditTrade={setAdjustTrade} />
+                        <TradeRow
+                          key={t.id}
+                          trade={t}
+                          onEditTrade={setAdjustTrade}
+                          onBreakEvenTrade={handleMoveActiveToBreakEven}
+                        />
                       ))}
                     </tbody>
                   </table>
@@ -864,11 +1003,174 @@ const ReplayPage = () => {
         {/* Right: Trade Execution Panel */}
         <div className="w-72 flex-shrink-0 flex flex-col gap-4">
 
+          {/* Active Position Management Panel (WHEN TRADE IS ON) */}
+          {openTrades.length > 0 && (() => {
+            const activeT = openTrades[0];
+            const isBuy = activeT.direction === 0 || activeT.direction === "Buy";
+            const curP = Number(currentPrice || activeT.entryPrice);
+            const entryVal = Number(activeT.entryPrice ?? activeT.entry);
+            const livePnl = calculatePnL(activeT.direction, entryVal, curP, Number(activeT.lots), activeSymbol);
+
+            return (
+              <div className="rounded-xl border-2 border-blue-500/70 bg-gradient-to-b from-blue-950/40 via-slate-900 to-slate-900 p-4 shadow-xl">
+                <div className="flex items-center justify-between mb-2.5 border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <h2 className="font-bold text-white text-xs">Active Position In Flight</h2>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuy ? "bg-green-500/20 text-green-400 border border-green-500/40" : "bg-red-500/20 text-red-400 border border-red-500/40"}`}>
+                    {isBuy ? "▲ BUY" : "▼ SELL"} · {Number(activeT.lots).toFixed(2)}L
+                  </span>
+                </div>
+
+                {/* Entry vs Live and Floating PnL */}
+                <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2.5 mb-2.5 text-xs">
+                  <div className="flex justify-between mb-1 text-slate-400">
+                    <span>Entry: <b className="text-white font-mono">{formatPriceVal(entryVal)}</b></span>
+                    <span>Now: <b className="text-white font-mono">{formatPriceVal(curP)}</b></span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-800/60 font-mono">
+                    <span className="text-slate-400 text-[11px]">Floating P&L:</span>
+                    <span className={`font-bold ${livePnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {livePnl >= 0 ? "+" : ""}${livePnl.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1-Click Move to Break-Even */}
+                <button
+                  type="button"
+                  onClick={() => handleMoveActiveToBreakEven(activeT)}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 mb-2.5 bg-amber-950/50 hover:bg-amber-900/70 border border-amber-600/70 rounded-lg text-[11px] font-bold text-amber-300 hover:text-white transition cursor-pointer shadow-sm"
+                  title="Lock in zero risk by setting Stop Loss equal to Entry Price"
+                >
+                  <Shield size={12} className="text-amber-400" />
+                  <span>⚡ Move to Break-Even (Risk-Free)</span>
+                </button>
+
+                {/* SL / TP In-Flight Target Inputs */}
+                <div className="space-y-2.5 mb-3">
+                  {/* Stop Loss Field */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                        <XCircle size={10} className="text-rose-500" />
+                        Modify Stop Loss (SL)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('sl', -1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          -1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('sl', 1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          +1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPickingTarget(pickingTarget === 'active_sl' ? null : 'active_sl')}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                            pickingTarget === 'active_sl'
+                              ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                              : 'bg-slate-800 border-slate-700 text-purple-400 hover:text-purple-300'
+                          }`}
+                          title="Click on chart canvas to adjust Stop Loss"
+                        >
+                          <Target size={9} />
+                          {pickingTarget === 'active_sl' ? 'Pick on Chart' : 'Chart'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="any"
+                      value={activeEditSl}
+                      onChange={(e) => setActiveEditSl(e.target.value)}
+                      placeholder="Modify SL or click Chart"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  {/* Take Profit Field */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                        <CheckCircle size={10} className="text-emerald-500" />
+                        Modify Take Profit (TP)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('tp', -1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          -1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('tp', 1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          +1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPickingTarget(pickingTarget === 'active_tp' ? null : 'active_tp')}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                            pickingTarget === 'active_tp'
+                              ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                              : 'bg-slate-800 border-slate-700 text-purple-400 hover:text-purple-300'
+                          }`}
+                          title="Click on chart canvas to adjust Take Profit"
+                        >
+                          <Target size={9} />
+                          {pickingTarget === 'active_tp' ? 'Pick on Chart' : 'Chart'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="any"
+                      value={activeEditTp}
+                      onChange={(e) => setActiveEditTp(e.target.value)}
+                      placeholder="Modify TP or click Chart"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Apply Targets & Close Buttons */}
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSaveActiveTargets}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg transition shadow-md shadow-blue-900/50 cursor-pointer"
+                  >
+                    💾 Update Position Targets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => closeTrade(activeT.id)}
+                    className="w-full py-1.5 bg-slate-800 hover:bg-red-700 border border-slate-700 hover:border-red-800 text-slate-300 hover:text-white font-semibold text-[11px] rounded-lg transition cursor-pointer"
+                  >
+                    Close Position at Market Price
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Trade Form */}
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="font-bold text-white mb-4 flex items-center gap-2 text-sm">
               <Activity size={14} className="text-blue-400" />
-              Market Execution
+              {openTrades.length > 0 ? "Place Additional Order" : "Market Execution"}
             </h2>
 
             {/* Current price display */}

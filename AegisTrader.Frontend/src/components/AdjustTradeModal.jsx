@@ -100,16 +100,13 @@ export default function AdjustTradeModal({
 
     // Directional validation
     if (isBuy) {
-      if (slNum >= entryPrice && !slNum) {
-        setError('Stop Loss should be below entry for BUY (unless locked at break-even).');
-      }
       if (tpNum <= entryPrice) {
-        setError('Take Profit must be above entry price for BUY.');
+        setError('Take Profit must be above entry price for BUY orders.');
         return;
       }
     } else {
       if (tpNum >= entryPrice) {
-        setError('Take Profit must be below entry price for SELL.');
+        setError('Take Profit must be below entry price for SELL orders.');
         return;
       }
     }

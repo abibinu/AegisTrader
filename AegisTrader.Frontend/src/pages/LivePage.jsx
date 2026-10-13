@@ -106,8 +106,23 @@ const LivePage = () => {
   const [showHistory, setShowHistory] = useState(true);
 
   // Chart SL/TP Picking and Adjustment modal state
-  const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | null
+  const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | 'active_sl' | 'active_tp' | null
   const [adjustTrade, setAdjustTrade] = useState(null);     // Active trade being edited
+  const [activeEditSl, setActiveEditSl] = useState("");
+  const [activeEditTp, setActiveEditTp] = useState("");
+
+  // Sync active edit fields with primary open trade
+  useEffect(() => {
+    if (openTrades.length > 0) {
+      const topTrade = openTrades[0];
+      const dec = getDecimals(symbol);
+      setActiveEditSl(topTrade.sl ? Number(topTrade.sl).toFixed(dec) : "");
+      setActiveEditTp(topTrade.tp ? Number(topTrade.tp).toFixed(dec) : "");
+    } else {
+      setActiveEditSl("");
+      setActiveEditTp("");
+    }
+  }, [openTrades, symbol]);
 
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
@@ -468,6 +483,13 @@ const LivePage = () => {
           const newClosed = closedNow.filter(t => !existingIds.has(t.id));
           return newClosed.length > 0 ? [...newClosed, ...prev] : prev;
         });
+        // Clear all planned and active SL / TP marks from chart immediately!
+        setSl("");
+        setTp("");
+        setActiveEditSl("");
+        setActiveEditTp("");
+        setPickingTarget(null);
+        setAdjustTrade(null);
         // Remove from processing guard after state updates are queued
         setTimeout(() => {
           closedNow.forEach(t => processingTradeIds.current.delete(t.id));
@@ -530,8 +552,10 @@ const LivePage = () => {
 
     setOpenTrades(prev => [newTrade, ...prev]);
     setTradeMessage({ type: "success", text: `${direction} order filled at ${formatPriceVal(entryPrice)}!` });
+    // Remove planned SL / TP marks from chart immediately once trade is placed!
     setSl("");
     setTp("");
+    setPickingTarget(null);
   };
 
   const closeTradeManually = (id) => {
@@ -559,7 +583,13 @@ const LivePage = () => {
       const existingIds = new Set(prev.map(t => t.id));
       return existingIds.has(id) ? prev : [closedTrade, ...prev];
     });
-    // Clean up processing guard
+    // Clear all target marks from chart immediately!
+    setSl("");
+    setTp("");
+    setActiveEditSl("");
+    setActiveEditTp("");
+    setPickingTarget(null);
+    setAdjustTrade(null);
     setTimeout(() => processingTradeIds.current.delete(id), 2000);
   };
 
@@ -572,6 +602,13 @@ const LivePage = () => {
         ...prev,
         [target === 'sl' ? 'sl' : 'tp']: Number(formattedPrice),
       }));
+      setPickingTarget(null);
+    } else if (openTrades.length > 0 && (target === 'active_sl' || target === 'active_tp' || pickingTarget === 'active_sl' || pickingTarget === 'active_tp')) {
+      if (target === 'active_sl' || pickingTarget === 'active_sl') {
+        setActiveEditSl(formattedPrice);
+      } else {
+        setActiveEditTp(formattedPrice);
+      }
       setPickingTarget(null);
     } else {
       if (target === 'sl') {
@@ -593,13 +630,52 @@ const LivePage = () => {
       if (t.id === tradeId) {
         return {
           ...t,
-          sl: Number(newSl),
-          tp: Number(newTp),
+          sl: newSl !== null && newSl !== undefined && newSl !== '' ? Number(newSl) : t.sl,
+          tp: newTp !== null && newTp !== undefined && newTp !== '' ? Number(newTp) : t.tp,
         };
       }
       return t;
     }));
     setTradeMessage({ type: "success", text: `Active position targets updated!` });
+  };
+
+  const handleNudgeActive = (target, pips) => {
+    if (openTrades.length === 0) return;
+    const curVal = target === 'sl' ? activeEditSl : activeEditTp;
+    const curPriceNum = currentTick ? (target === 'sl' ? currentTick.bid : currentTick.ask) : 0;
+    const pStep = getPipStep(symbol);
+    const dec = getDecimals(symbol);
+    const base = curVal ? Number(curVal) : curPriceNum;
+    const updated = base + (pips * pStep);
+    if (target === 'sl') setActiveEditSl(updated.toFixed(dec));
+    else setActiveEditTp(updated.toFixed(dec));
+  };
+
+  const handleMoveActiveToBreakEven = (tradeToSnap = null) => {
+    const targetTrade = tradeToSnap || openTrades[0];
+    if (!targetTrade) return;
+    const dec = getDecimals(symbol);
+    const entryFormatted = Number(targetTrade.entry).toFixed(dec);
+    setActiveEditSl(entryFormatted);
+    // If called from table BE button, persist immediately
+    if (tradeToSnap) {
+      handleAdjustTradeSave(targetTrade.id, entryFormatted, targetTrade.tp);
+    }
+  };
+
+  const handleSaveActiveTargets = () => {
+    if (openTrades.length === 0) return;
+    const primary = openTrades[0];
+    const slNum = activeEditSl ? Number(activeEditSl) : null;
+    const tpNum = activeEditTp ? Number(activeEditTp) : null;
+
+    if (!slNum && !tpNum) {
+      setTradeMessage({ type: "error", text: "Please enter valid SL or TP values." });
+      return;
+    }
+
+    handleAdjustTradeSave(primary.id, slNum, tpNum);
+    setTradeMessage({ type: "success", text: `Active trade SL/TP targets updated!` });
   };
 
   const handleNudgeInput = (target, pips) => {
@@ -898,6 +974,14 @@ const LivePage = () => {
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => handleMoveActiveToBreakEven(t)}
+                                  className="bg-amber-950/80 border border-amber-700/60 hover:bg-amber-900 text-[10px] font-bold text-amber-300 hover:text-white px-2 py-1 rounded transition cursor-pointer"
+                                  title="Snap SL to entry price (Break-Even)"
+                                >
+                                  ⚡ BE
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setAdjustTrade(t)}
                                   className="bg-blue-950/80 border border-blue-700/60 hover:bg-blue-900 text-[10px] font-semibold text-blue-300 hover:text-white px-2 py-1 rounded transition cursor-pointer"
                                   title="Adjust SL and TP targets"
@@ -973,10 +1057,172 @@ const LivePage = () => {
         {/* Right pane: dynamic price and order placement form */}
         <div className="w-72 flex-shrink-0 flex flex-col gap-4">
 
+          {/* Active Position Management Panel (WHEN TRADE IS ON) */}
+          {openTrades.length > 0 && (() => {
+            const activeT = openTrades[0];
+            const isBuy = activeT.direction === "Buy";
+            const curP = currentTick ? (isBuy ? currentTick.bid : currentTick.ask) : Number(activeT.entry);
+            const livePnl = calculatePnL(activeT.direction, Number(activeT.entry), curP, Number(activeT.lots));
+
+            return (
+              <div className="rounded-xl border-2 border-blue-500/70 bg-gradient-to-b from-blue-950/40 via-slate-900 to-slate-900 p-4 shadow-xl">
+                <div className="flex items-center justify-between mb-2.5 border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <h2 className="font-bold text-white text-xs">Active Position In Flight</h2>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuy ? "bg-green-500/20 text-green-400 border border-green-500/40" : "bg-red-500/20 text-red-400 border border-red-500/40"}`}>
+                    {isBuy ? "▲ BUY" : "▼ SELL"} · {Number(activeT.lots).toFixed(2)}L
+                  </span>
+                </div>
+
+                {/* Entry vs Live and Floating PnL */}
+                <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2.5 mb-2.5 text-xs">
+                  <div className="flex justify-between mb-1 text-slate-400">
+                    <span>Entry: <b className="text-white font-mono">{formatPriceVal(activeT.entry)}</b></span>
+                    <span>Now: <b className="text-white font-mono">{formatPriceVal(curP)}</b></span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-800/60 font-mono">
+                    <span className="text-slate-400 text-[11px]">Floating P&L:</span>
+                    <span className={`font-bold ${livePnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {livePnl >= 0 ? "+" : ""}${livePnl.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1-Click Move to Break-Even */}
+                <button
+                  type="button"
+                  onClick={() => handleMoveActiveToBreakEven(activeT)}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 mb-2.5 bg-amber-950/50 hover:bg-amber-900/70 border border-amber-600/70 rounded-lg text-[11px] font-bold text-amber-300 hover:text-white transition cursor-pointer shadow-sm"
+                  title="Lock in zero risk by setting Stop Loss equal to Entry Price"
+                >
+                  <Shield size={12} className="text-amber-400" />
+                  <span>⚡ Move to Break-Even (Risk-Free)</span>
+                </button>
+
+                {/* SL / TP In-Flight Target Inputs */}
+                <div className="space-y-2.5 mb-3">
+                  {/* Stop Loss Field */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                        <XCircle size={10} className="text-rose-500" />
+                        Modify Stop Loss (SL)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('sl', -1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          -1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('sl', 1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          +1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPickingTarget(pickingTarget === 'active_sl' ? null : 'active_sl')}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                            pickingTarget === 'active_sl'
+                              ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                              : 'bg-slate-800 border-slate-700 text-purple-400 hover:text-purple-300'
+                          }`}
+                          title="Click on chart canvas to adjust Stop Loss"
+                        >
+                          <Target size={9} />
+                          {pickingTarget === 'active_sl' ? 'Pick on Chart' : 'Chart'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="any"
+                      value={activeEditSl}
+                      onChange={(e) => setActiveEditSl(e.target.value)}
+                      placeholder="Modify SL or click Chart"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  {/* Take Profit Field */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                        <CheckCircle size={10} className="text-emerald-500" />
+                        Modify Take Profit (TP)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('tp', -1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          -1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNudgeActive('tp', 1)}
+                          className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-mono font-bold text-slate-400 hover:text-white"
+                        >
+                          +1p
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPickingTarget(pickingTarget === 'active_tp' ? null : 'active_tp')}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
+                            pickingTarget === 'active_tp'
+                              ? 'bg-purple-900 border-purple-500 text-purple-200 animate-pulse'
+                              : 'bg-slate-800 border-slate-700 text-purple-400 hover:text-purple-300'
+                          }`}
+                          title="Click on chart canvas to adjust Take Profit"
+                        >
+                          <Target size={9} />
+                          {pickingTarget === 'active_tp' ? 'Pick on Chart' : 'Chart'}
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="any"
+                      value={activeEditTp}
+                      onChange={(e) => setActiveEditTp(e.target.value)}
+                      placeholder="Modify TP or click Chart"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Apply Targets & Close Buttons */}
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSaveActiveTargets}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg transition shadow-md shadow-blue-900/50 cursor-pointer"
+                  >
+                    💾 Update Position Targets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => closeTradeManually(activeT.id)}
+                    className="w-full py-1.5 bg-slate-800 hover:bg-red-700 border border-slate-700 hover:border-red-800 text-slate-300 hover:text-white font-semibold text-[11px] rounded-lg transition cursor-pointer"
+                  >
+                    Close Position at Market Price
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="font-bold text-white mb-4 flex items-center gap-2 text-sm">
               <Activity size={14} className="text-emerald-400" />
-              Live Order Ticket
+              {openTrades.length > 0 ? "Place Additional Order" : "Live Order Ticket"}
             </h2>
 
             {/* BID and ASK boxes */}

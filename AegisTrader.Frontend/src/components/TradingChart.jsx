@@ -377,8 +377,12 @@ const TradingChart = ({
         priceLinesRef.current = [];
 
         // 1. Draw price lines for active open trades
-        if (trades && trades.length > 0) {
-            const openTrades = trades.filter(t => t.status === 0 || t.status === 'Open');
+        const openTrades = (trades && trades.length > 0)
+            ? trades.filter(t => t.status === 0 || t.status === 'Open')
+            : [];
+        const hasOpenTrade = openTrades.length > 0;
+
+        if (hasOpenTrade) {
             openTrades.forEach(t => {
                 const isBuy = t.direction === 0 || t.direction === 'Buy';
                 const tradeShortId = (t.id ? String(t.id).slice(0, 4) : '');
@@ -427,35 +431,36 @@ const TradingChart = ({
             });
         }
 
-        // 2. Draw pre-trade planned Stop Loss line
-        if (plannedSl !== null && plannedSl !== undefined && plannedSl !== '') {
-            const pSl = Number(plannedSl);
-            if (!isNaN(pSl) && pSl > 0) {
-                const pSlLine = seriesRef.current.createPriceLine({
-                    price: pSl,
-                    color: '#f43f5e',
-                    lineWidth: 2,
-                    lineStyle: 1, // Dotted
-                    axisLabelVisible: true,
-                    title: 'PLANNED SL',
-                });
-                priceLinesRef.current.push(pSlLine);
+        // 2. Draw pre-trade planned Stop Loss / Take Profit lines ONLY if no trade is active
+        if (!hasOpenTrade) {
+            if (plannedSl !== null && plannedSl !== undefined && plannedSl !== '') {
+                const pSl = Number(plannedSl);
+                if (!isNaN(pSl) && pSl > 0) {
+                    const pSlLine = seriesRef.current.createPriceLine({
+                        price: pSl,
+                        color: '#f43f5e',
+                        lineWidth: 2,
+                        lineStyle: 1, // Dotted
+                        axisLabelVisible: true,
+                        title: 'PLANNED SL',
+                    });
+                    priceLinesRef.current.push(pSlLine);
+                }
             }
-        }
 
-        // 3. Draw pre-trade planned Take Profit line
-        if (plannedTp !== null && plannedTp !== undefined && plannedTp !== '') {
-            const pTp = Number(plannedTp);
-            if (!isNaN(pTp) && pTp > 0) {
-                const pTpLine = seriesRef.current.createPriceLine({
-                    price: pTp,
-                    color: '#10b981',
-                    lineWidth: 2,
-                    lineStyle: 1, // Dotted
-                    axisLabelVisible: true,
-                    title: 'PLANNED TP',
-                });
-                priceLinesRef.current.push(pTpLine);
+            if (plannedTp !== null && plannedTp !== undefined && plannedTp !== '') {
+                const pTp = Number(plannedTp);
+                if (!isNaN(pTp) && pTp > 0) {
+                    const pTpLine = seriesRef.current.createPriceLine({
+                        price: pTp,
+                        color: '#10b981',
+                        lineWidth: 2,
+                        lineStyle: 1, // Dotted
+                        axisLabelVisible: true,
+                        title: 'PLANNED TP',
+                    });
+                    priceLinesRef.current.push(pTpLine);
+                }
             }
         }
 

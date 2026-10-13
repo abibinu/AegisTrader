@@ -161,15 +161,44 @@ public class MlForecastingService
             y[rowIdx] = Math.Log(closes[i + 1] / closes[i]);
         }
 
-        // ── 2. Model Training via L2-Regularized Ridge Regression ───────────────────
+        // ── 2. Feature Standardization (Z-Score Normalization) ────────────────────
+        // Standardize each feature to zero mean and unit variance so all 5 features
+        // (returns, RSI, divergence, volatility, volume) contribute proportionally.
         int numFeatures = 5;
+        double[] means = new double[numFeatures];
+        double[] stds = new double[numFeatures];
+
+        for (int f = 0; f < numFeatures; f++)
+        {
+            double sum = 0.0;
+            for (int i = 0; i < sampleCount; i++) sum += X[i][f];
+            means[f] = sum / sampleCount;
+
+            double sqSum = 0.0;
+            for (int i = 0; i < sampleCount; i++) sqSum += Math.Pow(X[i][f] - means[f], 2);
+            double std = Math.Sqrt(sqSum / sampleCount);
+            stds[f] = std > 1e-12 ? std : 1.0;
+        }
+
+        // Standardized feature matrix Z
+        double[][] Z = new double[sampleCount][];
+        for (int i = 0; i < sampleCount; i++)
+        {
+            Z[i] = new double[numFeatures];
+            for (int f = 0; f < numFeatures; f++)
+            {
+                Z[i][f] = (X[i][f] - means[f]) / stds[f];
+            }
+        }
+
+        // ── 3. Model Training via L2-Regularized Ridge Regression ───────────────────
         double[] weights = new double[numFeatures];
         double bias = 0.0;
-        double lambda = 0.05; // L2 regularization coefficient
+        double lambda = 0.02; // L2 regularization coefficient
 
         // Solve via Batch Gradient Descent with Momentum for robust convergence
-        double learningRate = 0.01;
-        int epochs = 150;
+        double learningRate = 0.008;
+        int epochs = 200;
         double[] velocity = new double[numFeatures];
         double momentum = 0.9;
 
@@ -181,12 +210,12 @@ public class MlForecastingService
             for (int i = 0; i < sampleCount; i++)
             {
                 double pred = bias;
-                for (int f = 0; f < numFeatures; f++) pred += weights[f] * X[i][f];
+                for (int f = 0; f < numFeatures; f++) pred += weights[f] * Z[i][f];
                 double error = pred - y[i];
 
                 for (int f = 0; f < numFeatures; f++)
                 {
-                    gradW[f] += error * X[i][f];
+                    gradW[f] += error * Z[i][f];
                 }
                 gradB += error;
             }
@@ -200,7 +229,7 @@ public class MlForecastingService
             bias -= learningRate * (gradB / sampleCount);
         }
 
-        // ── 3. Model Evaluation Metrics (MAE, RMSE, R², Accuracy) ───────────────────
+        // ── 4. Model Evaluation Metrics (MAE, RMSE, R², Accuracy) ───────────────────
         double sumAbsErr = 0.0;
         double sumSqErr = 0.0;
         double sumTarget = 0.0;
@@ -213,7 +242,7 @@ public class MlForecastingService
         for (int i = 0; i < sampleCount; i++)
         {
             double pred = bias;
-            for (int f = 0; f < numFeatures; f++) pred += weights[f] * X[i][f];
+            for (int f = 0; f < numFeatures; f++) pred += weights[f] * Z[i][f];
             double err = y[i] - pred;
 
             sumAbsErr += Math.Abs(err);
@@ -232,12 +261,18 @@ public class MlForecastingService
         double rSquared = totalSumSquares > 1e-9 ? Math.Max(0.0, Math.Min(0.99, 1.0 - (sumSqErr / totalSumSquares))) : 0.50;
         double directionalAccuracy = Math.Round(((double)correctDirectionCount / sampleCount) * 100.0, 1);
 
-        // ── 4. Out-of-Sample Inference for Next Candle ──────────────────────────────
+        // ── 5. Out-of-Sample Inference for Next Candle ──────────────────────────────
         double[] latestFeatures = ExtractFeatureVector(closes, highs, lows, volumes, n - 1);
+        double[] latestZ = new double[numFeatures];
+        for (int f = 0; f < numFeatures; f++)
+        {
+            latestZ[f] = (latestFeatures[f] - means[f]) / stds[f];
+        }
+
         double predictedReturn = bias;
         for (int f = 0; f < numFeatures; f++)
         {
-            predictedReturn += weights[f] * latestFeatures[f];
+            predictedReturn += weights[f] * latestZ[f];
         }
 
         double currentPriceDouble = closes[^1];
@@ -261,11 +296,11 @@ public class MlForecastingService
             : bullishProb <= 0.46 ? "Moderate Sell"
             : "Neutral Consolidation";
 
-        // Feature Importance List
+        // Feature Importance List with Standardized Weights
         var featureNames = new[] { "Log Return (t-1)", "RSI Normalized (14)", "SMA-20 Divergence", "Rolling Volatility", "Volume Momentum" };
         var featureList = new List<FeatureWeightDto>();
         double maxWeightMag = weights.Max(w => Math.Abs(w));
-        maxWeightMag = maxWeightMag > 0 ? maxWeightMag : 1.0;
+        maxWeightMag = maxWeightMag > 1e-9 ? maxWeightMag : 1.0;
 
         for (int f = 0; f < numFeatures; f++)
         {
