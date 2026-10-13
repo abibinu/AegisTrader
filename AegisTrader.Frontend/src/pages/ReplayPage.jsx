@@ -193,6 +193,24 @@ const ReplayPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Active Symbol (from active session or user dropdown)
+  const activeSymbol = session?.symbol ?? session?.Symbol ?? symbol;
+
+  // Format price with appropriate decimal precision
+  const formatPriceVal = useCallback((val) => {
+    if (val === null || val === undefined || isNaN(val)) return "—";
+    const num = Number(val);
+    const sym = activeSymbol?.toUpperCase() ?? '';
+    if (sym.includes("JPY") || (num >= 20 && num < 1000)) return num.toFixed(3);
+    if (sym === "XAUUSD" || sym === "BTCUSD" || num >= 1000) return num.toFixed(2);
+    return num.toFixed(5);
+  }, [activeSymbol]);
+
+  // Latest candle market price
+  const currentPrice = candles.length > 0
+    ? formatPriceVal(candles[candles.length - 1].close ?? candles[candles.length - 1].Close)
+    : "—";
+
   // DB diagnostic state
   const [dbStatus, setDbStatus] = useState(null);
   // Default start time: 2024-02-01 00:00 (user can override)
@@ -205,10 +223,16 @@ const ReplayPage = () => {
   const [tradeLoading, setTradeLoading] = useState(false);
   const [tradeMessage, setTradeMessage] = useState(null);
 
+  // Active trade direct adjustment states (for right-hand management card)
+  const [activeEditSl, setActiveEditSl] = useState("");
+  const [activeEditTp, setActiveEditTp] = useState("");
+
   // Trade history state
   const [trades, setTrades] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const prevOpenCountRef = useRef(0);
+
+  const openTrades = trades.filter((t) => t.status === 0 || t.status === "Open");
 
   // Chart SL/TP Picking and Adjustment modal state
   const [pickingTarget, setPickingTarget] = useState(null); // 'sl' | 'tp' | null
@@ -444,12 +468,6 @@ const ReplayPage = () => {
     }
   };
 
-  // Active trade direct adjustment states (for right-hand management card)
-  const [activeEditSl, setActiveEditSl] = useState("");
-  const [activeEditTp, setActiveEditTp] = useState("");
-
-  const openTrades = trades.filter(t => t.status === 0 || t.status === "Open");
-
   useEffect(() => {
     if (openTrades.length > 0) {
       const topTrade = openTrades[0];
@@ -579,21 +597,6 @@ const ReplayPage = () => {
       setTp((curPriceNum - tpPips * pStep).toFixed(dec));
     }
   };
-
-  const activeSymbol = session?.symbol ?? session?.Symbol ?? symbol;
-
-  const formatPriceVal = useCallback((val) => {
-    if (val === null || val === undefined || isNaN(val)) return "—";
-    const num = Number(val);
-    const sym = activeSymbol.toUpperCase();
-    if (sym.includes("JPY") || (num >= 20 && num < 1000)) return num.toFixed(3);
-    if (sym === "XAUUSD" || sym === "BTCUSD" || num >= 1000) return num.toFixed(2);
-    return num.toFixed(5);
-  }, [activeSymbol]);
-
-  const currentPrice = candles.length > 0
-    ? formatPriceVal(candles[candles.length - 1].close ?? candles[candles.length - 1].Close)
-    : "—";
 
   const openTradesCount = trades.filter(
     (t) => t.status === 0 || t.status === "Open"
