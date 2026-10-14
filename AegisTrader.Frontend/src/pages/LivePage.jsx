@@ -111,10 +111,14 @@ const LivePage = () => {
   const [activeEditSl, setActiveEditSl] = useState("");
   const [activeEditTp, setActiveEditTp] = useState("");
 
-  // Sync active edit fields with primary open trade
+  // Multi-asset latest tick cache so open trades in other symbols display accurate live prices & P&L
+  const [latestTicks, setLatestTicks] = useState({});
+
+  // Sync active edit fields with primary open trade of CURRENT symbol
   useEffect(() => {
-    if (openTrades.length > 0) {
-      const topTrade = openTrades[0];
+    const currentOpen = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase());
+    if (currentOpen.length > 0) {
+      const topTrade = currentOpen[0];
       const dec = getDecimals(symbol);
       setActiveEditSl(topTrade.sl ? Number(topTrade.sl).toFixed(dec) : "");
       setActiveEditTp(topTrade.tp ? Number(topTrade.tp).toFixed(dec) : "");
@@ -127,19 +131,19 @@ const LivePage = () => {
   // Timeframe state: 1=1m, 5=5m, 15=15m, 60=1H, 240=4H
   const [timeframe, setTimeframe] = useState(1);
 
-  // Dynamic price formatter based on symbol
-  const formatPriceVal = useCallback((val) => {
+  // Dynamic price formatter based on specific or active symbol
+  const formatPriceVal = useCallback((val, targetSymbol = null) => {
     if (val === null || val === undefined || isNaN(val)) return '—';
     const num = Number(val);
-    const sym = symbol?.toUpperCase() ?? '';
+    const sym = (targetSymbol || symbol)?.toUpperCase() ?? '';
     if (sym.includes('JPY') || (num >= 20 && num < 1000)) return num.toFixed(3);
     if (sym === 'XAUUSD' || sym === 'BTCUSD' || num >= 1000) return num.toFixed(2);
     return num.toFixed(5);
   }, [symbol]);
 
-  // Dynamic PnL calculator supporting Forex, JPY, Gold, and Crypto
-  const calculatePnL = useCallback((direction, entry, exit, lotSize) => {
-    const sym = symbol?.toUpperCase() ?? 'EURUSD';
+  // Dynamic PnL calculator supporting Forex, JPY, Gold, and Crypto for any specified asset symbol
+  const calculatePnL = useCallback((direction, entry, exit, lotSize, targetSymbol = null) => {
+    const sym = (targetSymbol || symbol)?.toUpperCase() ?? 'EURUSD';
     let pips = 0;
     let pipValue = 10;
     const priceDiff = direction === "Buy" ? (exit - entry) : (entry - exit);
@@ -159,6 +163,27 @@ const LivePage = () => {
     }
     return pips * lotSize * pipValue;
   }, [symbol]);
+
+  // Precise live price accessor for any open trade (matches its own symbol)
+  const getTradeLivePrice = useCallback((t) => {
+    const tradeSym = t.symbol || 'EURUSD';
+    const isCur = tradeSym.toUpperCase() === symbol.toUpperCase();
+    if (isCur && currentTick) {
+      return t.direction === "Buy" ? currentTick.bid : currentTick.ask;
+    }
+    const otherTick = latestTicks[tradeSym];
+    if (otherTick) {
+      return t.direction === "Buy" ? otherTick.bid : otherTick.ask;
+    }
+    return t.lastPrice || Number(t.entry);
+  }, [symbol, currentTick, latestTicks]);
+
+  // Precise live floating PnL for any open trade using its own asset pip model
+  const getTradePnL = useCallback((t) => {
+    const livePrice = getTradeLivePrice(t);
+    const tradeSym = t.symbol || 'EURUSD';
+    return calculatePnL(t.direction, Number(t.entry), livePrice, Number(t.lots), tradeSym);
+  }, [getTradeLivePrice, calculatePnL]);
 
   // Helper: aggregate an array of 1m candle objects into N-minute candles (client-side)
   const aggregateCandles = useCallback((oneMinuteCandles, tf) => {
@@ -332,6 +357,10 @@ const LivePage = () => {
           setPrevTick(prev);
           return newTick;
         });
+        setLatestTicks(prev => ({
+          ...prev,
+          [symbol]: newTick
+        }));
       } catch (err) {
         console.error("Failed to poll tick:", err);
       }
@@ -341,6 +370,39 @@ const LivePage = () => {
     const interval = setInterval(pollTick, 500);
     return () => clearInterval(interval);
   }, [symbol]);
+
+  // Background polling for other symbols with open trades so their live prices & P&L stay fresh
+  useEffect(() => {
+    const otherSymbols = [...new Set(openTrades.map(t => t.symbol || 'EURUSD'))]
+      .filter(s => s.toUpperCase() !== symbol.toUpperCase());
+    if (otherSymbols.length === 0) return;
+
+    const pollOthers = async () => {
+      for (const s of otherSymbols) {
+        try {
+          const res = await client.get(`/LivePrice/latest?symbol=${s}`);
+          if (res.data) {
+            const otTick = {
+              symbol: res.data.symbol ?? res.data.Symbol ?? s,
+              bid: Number(res.data.bid ?? res.data.Bid),
+              ask: Number(res.data.ask ?? res.data.Ask),
+              timestamp: res.data.timestamp ?? res.data.Timestamp
+            };
+            setLatestTicks(prev => ({
+              ...prev,
+              [s]: otTick
+            }));
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }
+    };
+
+    pollOthers();
+    const interval = setInterval(pollOthers, 1500);
+    return () => clearInterval(interval);
+  }, [openTrades, symbol]);
 
   // Roll ticks into chart candles for the active timeframe and check trade triggers
   useEffect(() => {
@@ -442,6 +504,10 @@ const LivePage = () => {
         // Skip if this trade is already being processed by a previous effect invocation
         if (processingTradeIds.current.has(t.id)) return;
 
+        // CRITICAL FIX: Only evaluate triggers against ticks of the MATCHING symbol!
+        const tradeSym = t.symbol || 'EURUSD';
+        if (tradeSym.toUpperCase() !== symbol.toUpperCase()) return;
+
         const bid = currentTick.bid;
         const ask = currentTick.ask;
         const slPrice = t.sl ? Number(t.sl) : null;
@@ -461,9 +527,10 @@ const LivePage = () => {
         if (hitSl || hitTp) {
           // Mark as processing immediately to block duplicate closes
           processingTradeIds.current.add(t.id);
-          const pnl = calculatePnL(t.direction, Number(t.entry), exitPrice, Number(t.lots));
+          const pnl = calculatePnL(t.direction, Number(t.entry), exitPrice, Number(t.lots), tradeSym);
           closedNow.push({
             ...t,
+            symbol: tradeSym,
             exit: exitPrice,
             pnl,
             status: "Closed",
@@ -483,13 +550,15 @@ const LivePage = () => {
           const newClosed = closedNow.filter(t => !existingIds.has(t.id));
           return newClosed.length > 0 ? [...newClosed, ...prev] : prev;
         });
-        // Clear all planned and active SL / TP marks from chart immediately!
-        setSl("");
-        setTp("");
-        setActiveEditSl("");
-        setActiveEditTp("");
-        setPickingTarget(null);
-        setAdjustTrade(null);
+        // Clear all planned and active SL / TP marks from chart if current symbol's trade closed!
+        if (closedNow.some(ct => (ct.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase())) {
+          setSl("");
+          setTp("");
+          setActiveEditSl("");
+          setActiveEditTp("");
+          setPickingTarget(null);
+          setAdjustTrade(null);
+        }
         // Remove from processing guard after state updates are queued
         setTimeout(() => {
           closedNow.forEach(t => processingTradeIds.current.delete(t.id));
@@ -541,6 +610,7 @@ const LivePage = () => {
 
     const newTrade = {
       id: crypto.randomUUID(),
+      symbol: symbol,
       direction,
       entry: entryPrice,
       lots: lotSize,
@@ -565,11 +635,18 @@ const LivePage = () => {
     if (!tradeToClose) return;
 
     processingTradeIds.current.add(id);
-    const exitPrice = tradeToClose.direction === "Buy" ? currentTick.bid : currentTick.ask;
-    const pnl = calculatePnL(tradeToClose.direction, Number(tradeToClose.entry), exitPrice, Number(tradeToClose.lots));
+    const tradeSym = tradeToClose.symbol || 'EURUSD';
+    const isCurrent = tradeSym.toUpperCase() === symbol.toUpperCase();
+    const tickForTrade = isCurrent ? currentTick : latestTicks[tradeSym];
+    const exitPrice = tickForTrade
+      ? (tradeToClose.direction === "Buy" ? tickForTrade.bid : tickForTrade.ask)
+      : (tradeToClose.lastPrice || Number(tradeToClose.entry));
+
+    const pnl = calculatePnL(tradeToClose.direction, Number(tradeToClose.entry), exitPrice, Number(tradeToClose.lots), tradeSym);
     
     const closedTrade = {
       ...tradeToClose,
+      symbol: tradeSym,
       exit: exitPrice,
       pnl,
       status: "Closed",
@@ -583,13 +660,16 @@ const LivePage = () => {
       const existingIds = new Set(prev.map(t => t.id));
       return existingIds.has(id) ? prev : [closedTrade, ...prev];
     });
-    // Clear all target marks from chart immediately!
-    setSl("");
-    setTp("");
-    setActiveEditSl("");
-    setActiveEditTp("");
-    setPickingTarget(null);
-    setAdjustTrade(null);
+
+    if (isCurrent) {
+      // Clear target marks from chart for current symbol
+      setSl("");
+      setTp("");
+      setActiveEditSl("");
+      setActiveEditTp("");
+      setPickingTarget(null);
+      setAdjustTrade(null);
+    }
     setTimeout(() => processingTradeIds.current.delete(id), 2000);
   };
 
@@ -640,7 +720,8 @@ const LivePage = () => {
   };
 
   const handleNudgeActive = (target, pips) => {
-    if (openTrades.length === 0) return;
+    const currentOpen = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase());
+    if (currentOpen.length === 0) return;
     const curVal = target === 'sl' ? activeEditSl : activeEditTp;
     const curPriceNum = currentTick ? (target === 'sl' ? currentTick.bid : currentTick.ask) : 0;
     const pStep = getPipStep(symbol);
@@ -652,11 +733,15 @@ const LivePage = () => {
   };
 
   const handleMoveActiveToBreakEven = (tradeToSnap = null) => {
-    const targetTrade = tradeToSnap || openTrades[0];
+    const currentOpen = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase());
+    const targetTrade = tradeToSnap || currentOpen[0];
     if (!targetTrade) return;
-    const dec = getDecimals(symbol);
+    const targetSym = targetTrade.symbol || symbol;
+    const dec = getDecimals(targetSym);
     const entryFormatted = Number(targetTrade.entry).toFixed(dec);
-    setActiveEditSl(entryFormatted);
+    if (!tradeToSnap || targetSym.toUpperCase() === symbol.toUpperCase()) {
+      setActiveEditSl(entryFormatted);
+    }
     // If called from table BE button, persist immediately
     if (tradeToSnap) {
       handleAdjustTradeSave(targetTrade.id, entryFormatted, targetTrade.tp);
@@ -664,8 +749,9 @@ const LivePage = () => {
   };
 
   const handleSaveActiveTargets = () => {
-    if (openTrades.length === 0) return;
-    const primary = openTrades[0];
+    const currentOpen = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase());
+    if (currentOpen.length === 0) return;
+    const primary = currentOpen[0];
     const slNum = activeEditSl ? Number(activeEditSl) : null;
     const tpNum = activeEditTp ? Number(activeEditTp) : null;
 
@@ -719,11 +805,8 @@ const LivePage = () => {
 
   // ── Derived Values ──────────────────────────────────────────────────────────
   
-  // Calculate dynamic floating open P&L — guard against null tick on initial load
-  const floatingPnL = !currentTick ? 0 : openTrades.reduce((sum, t) => {
-    const currentPrice = t.direction === "Buy" ? currentTick.bid : currentTick.ask;
-    return sum + calculatePnL(t.direction, Number(t.entry), currentPrice, Number(t.lots));
-  }, 0);
+  // Calculate dynamic floating open P&L across all assets using each trade's own symbol price & pip scale
+  const floatingPnL = openTrades.reduce((sum, t) => sum + getTradePnL(t), 0);
 
   const realizedPnL = tradeHistory.reduce((sum, t) => sum + t.pnl, 0);
   const runningEquity = balance + floatingPnL;
@@ -889,7 +972,7 @@ const LivePage = () => {
             {candles.length > 0 ? (
               <TradingChart
                 data={candles}
-                trades={openTrades.concat(tradeHistory)}
+                trades={openTrades.concat(tradeHistory).filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase())}
                 timeframe={timeframe}
                 symbol={symbol}
                 onTimeframeChange={handleLiveTimeframeChange}
@@ -937,6 +1020,7 @@ const LivePage = () => {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="text-xs text-slate-500 uppercase tracking-wider bg-slate-900/80 border-b border-slate-800">
+                        <th className="py-2.5 px-3">Asset</th>
                         <th className="py-2.5 px-3">Dir</th>
                         <th className="py-2.5 px-3">Lots</th>
                         <th className="py-2.5 px-3">Entry</th>
@@ -949,12 +1033,25 @@ const LivePage = () => {
                     </thead>
                     <tbody>
                       {openTrades.map((t) => {
-                        const curPrice = currentTick
-                          ? (t.direction === "Buy" ? currentTick.bid : currentTick.ask)
-                          : Number(t.entry);
-                        const pnl = calculatePnL(t.direction, Number(t.entry), curPrice, Number(t.lots));
+                        const tradeSym = t.symbol || 'EURUSD';
+                        const curPrice = getTradeLivePrice(t);
+                        const pnl = getTradePnL(t);
                         return (
                           <tr key={t.id} className="border-b border-slate-800/40 hover:bg-slate-800/35 transition font-mono text-xs">
+                            <td className="py-2 px-3">
+                              <button
+                                type="button"
+                                onClick={() => handleSymbolChange(tradeSym)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                                  tradeSym.toUpperCase() === symbol.toUpperCase()
+                                    ? 'bg-blue-600/30 text-blue-300 border-blue-500/50'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:border-slate-500'
+                                }`}
+                                title={`Switch chart to ${tradeSym}`}
+                              >
+                                {tradeSym}
+                              </button>
+                            </td>
                             <td className="py-2 px-3">
                               <span className={`inline-flex px-2 py-0.5 rounded-full font-bold ${
                                 t.direction === "Buy" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
@@ -963,10 +1060,10 @@ const LivePage = () => {
                               </span>
                             </td>
                             <td className="py-2 px-3 text-slate-300">{Number(t.lots).toFixed(2)}</td>
-                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.entry)}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl) : "—"}</td>
-                            <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp) : "—"}</td>
-                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(curPrice)}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.entry, tradeSym)}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl, tradeSym) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp, tradeSym) : "—"}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatPriceVal(curPrice, tradeSym)}</td>
                             <td className={`py-2 px-3 font-bold ${pnl >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
                               {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}
                             </td>
@@ -1010,6 +1107,7 @@ const LivePage = () => {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="text-xs text-slate-500 uppercase tracking-wider bg-slate-900/80 border-b border-slate-800">
+                        <th className="py-2.5 px-3">Asset</th>
                         <th className="py-2.5 px-3">Dir</th>
                         <th className="py-2.5 px-3">Lots</th>
                         <th className="py-2.5 px-3">Entry</th>
@@ -1024,6 +1122,11 @@ const LivePage = () => {
                       {tradeHistory.map((t) => (
                         <tr key={t.id} className="border-b border-slate-800/40 hover:bg-slate-800/35 transition font-mono text-xs">
                           <td className="py-2 px-3">
+                            <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 border border-slate-700 text-slate-300">
+                              {t.symbol || 'EURUSD'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
                             <span className={`inline-flex px-2 py-0.5 rounded-full font-bold ${
                               t.direction === "Buy" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
                             }`}>
@@ -1031,10 +1134,10 @@ const LivePage = () => {
                             </span>
                           </td>
                           <td className="py-2 px-3 text-slate-400">{Number(t.lots).toFixed(2)}</td>
-                          <td className="py-2 px-3 text-slate-400">{formatPriceVal(t.entry)}</td>
-                          <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.exit)}</td>
-                          <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl) : "—"}</td>
-                          <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp) : "—"}</td>
+                          <td className="py-2 px-3 text-slate-400">{formatPriceVal(t.entry, t.symbol)}</td>
+                          <td className="py-2 px-3 text-slate-300">{formatPriceVal(t.exit, t.symbol)}</td>
+                          <td className="py-2 px-3 text-slate-500">{t.sl ? formatPriceVal(t.sl, t.symbol) : "—"}</td>
+                          <td className="py-2 px-3 text-slate-500">{t.tp ? formatPriceVal(t.tp, t.symbol) : "—"}</td>
                           <td className={`py-2 px-3 font-bold ${Number(t.pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-500"}`}>
                             {Number(t.pnl ?? 0) >= 0 ? "+" : ""}{Number(t.pnl ?? 0).toFixed(2)}
                           </td>
@@ -1057,12 +1160,14 @@ const LivePage = () => {
         {/* Right pane: dynamic price and order placement form */}
         <div className="w-72 flex-shrink-0 flex flex-col gap-4">
 
-          {/* Active Position Management Panel (WHEN TRADE IS ON) */}
-          {openTrades.length > 0 && (() => {
-            const activeT = openTrades[0];
+          {/* Active Position Management Panel (WHEN CURRENT ASSET TRADE IS ON) */}
+          {(() => {
+            const currentSymbolOpenTrades = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase());
+            if (currentSymbolOpenTrades.length === 0) return null;
+            const activeT = currentSymbolOpenTrades[0];
             const isBuy = activeT.direction === "Buy";
             const curP = currentTick ? (isBuy ? currentTick.bid : currentTick.ask) : Number(activeT.entry);
-            const livePnl = calculatePnL(activeT.direction, Number(activeT.entry), curP, Number(activeT.lots));
+            const livePnl = calculatePnL(activeT.direction, Number(activeT.entry), curP, Number(activeT.lots), symbol);
 
             return (
               <div className="rounded-xl border-2 border-blue-500/70 bg-gradient-to-b from-blue-950/40 via-slate-900 to-slate-900 p-4 shadow-xl">
@@ -1072,15 +1177,15 @@ const LivePage = () => {
                     <h2 className="font-bold text-white text-xs">Active Position In Flight</h2>
                   </div>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuy ? "bg-green-500/20 text-green-400 border border-green-500/40" : "bg-red-500/20 text-red-400 border border-red-500/40"}`}>
-                    {isBuy ? "▲ BUY" : "▼ SELL"} · {Number(activeT.lots).toFixed(2)}L
+                    {symbol} · {isBuy ? "▲ BUY" : "▼ SELL"} · {Number(activeT.lots).toFixed(2)}L
                   </span>
                 </div>
 
                 {/* Entry vs Live and Floating PnL */}
                 <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2.5 mb-2.5 text-xs">
                   <div className="flex justify-between mb-1 text-slate-400">
-                    <span>Entry: <b className="text-white font-mono">{formatPriceVal(activeT.entry)}</b></span>
-                    <span>Now: <b className="text-white font-mono">{formatPriceVal(curP)}</b></span>
+                    <span>Entry: <b className="text-white font-mono">{formatPriceVal(activeT.entry, symbol)}</b></span>
+                    <span>Now: <b className="text-white font-mono">{formatPriceVal(curP, symbol)}</b></span>
                   </div>
                   <div className="flex justify-between items-center pt-1 border-t border-slate-800/60 font-mono">
                     <span className="text-slate-400 text-[11px]">Floating P&L:</span>
@@ -1219,10 +1324,61 @@ const LivePage = () => {
             );
           })()}
 
+          {/* Positions on Other Assets Alert Banner */}
+          {(() => {
+            const otherAssetTrades = openTrades.filter(t => (t.symbol || 'EURUSD').toUpperCase() !== symbol.toUpperCase());
+            if (otherAssetTrades.length === 0) return null;
+
+            return (
+              <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 shadow-md">
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="text-slate-400 font-semibold flex items-center gap-1.5">
+                    <Activity size={12} className="text-amber-400" />
+                    Open On Other Assets ({otherAssetTrades.length})
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {otherAssetTrades.map(ot => {
+                    const otSym = ot.symbol || 'EURUSD';
+                    const otPnl = getTradePnL(ot);
+                    return (
+                      <div
+                        key={ot.id}
+                        className="flex items-center justify-between bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${ot.direction === "Buy" ? "text-green-400 bg-green-500/10" : "text-red-400 bg-red-500/10"}`}>
+                            {ot.direction === "Buy" ? "▲ BUY" : "▼ SELL"}
+                          </span>
+                          <span className="text-white font-bold">{otSym}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${otPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                            {otPnl >= 0 ? "+" : ""}${otPnl.toFixed(2)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSymbolChange(otSym)}
+                            className="px-2 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 border border-blue-700/60 text-[10px] font-semibold text-blue-200 transition cursor-pointer"
+                            title={`Switch chart to ${otSym}`}
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="font-bold text-white mb-4 flex items-center gap-2 text-sm">
               <Activity size={14} className="text-emerald-400" />
-              {openTrades.length > 0 ? "Place Additional Order" : "Live Order Ticket"}
+              {openTrades.some(t => (t.symbol || 'EURUSD').toUpperCase() === symbol.toUpperCase())
+                ? "Place Additional Order"
+                : "Live Order Ticket"}
             </h2>
 
             {/* BID and ASK boxes */}

@@ -309,7 +309,12 @@ const TradingChart = ({
                         seenIds.set(t.id, t);
                     }
                 });
-                const uniqueTrades = Array.from(seenIds.values());
+                const uniqueTrades = Array.from(seenIds.values()).filter(
+                    t => {
+                        const sym = t.symbol || t.Symbol;
+                        return !sym || sym.toUpperCase() === symbol.toUpperCase();
+                    }
+                );
 
                 uniqueTrades.forEach(t => {
                     const openTime = t.openedAt ?? t.OpenedAt;
@@ -376,9 +381,13 @@ const TradingChart = ({
         });
         priceLinesRef.current = [];
 
-        // 1. Draw price lines for active open trades
+        // 1. Draw price lines for active open trades matching current symbol
         const openTrades = (trades && trades.length > 0)
-            ? trades.filter(t => t.status === 0 || t.status === 'Open')
+            ? trades.filter(t => {
+                const isTradeOpen = t.status === 0 || t.status === 'Open';
+                const sym = t.symbol || t.Symbol;
+                return isTradeOpen && (!sym || sym.toUpperCase() === symbol.toUpperCase());
+            })
             : [];
         const hasOpenTrade = openTrades.length > 0;
 
