@@ -18,6 +18,7 @@
   - **AI Machine Learning Time-Series Forecaster:** In-memory multivariate Ridge Regression engine extracting log returns, RSI(14), SMA(20) divergence, rolling volatility, and volume momentum to output directional bias, 95% confidence intervals, and out-of-sample error validation metrics (MAE, RMSE, $R^2$, Accuracy %).
   - **Interactive Chart SL / TP & Canvas Coordinate Picking:** Direct click-to-pick chart pricing, visual pre-trade planned SL/TP preview lines, and active position target markers.
   - **1-Click Presets & In-Flight Position Modification:** Quick 1:2 and 1:3 Risk-to-Reward preset calculation bar, pip nudges, and dedicated modal supporting single-click **Move to Break-Even** protection for open trades.
+  - **Multi-Asset Isolation & Portfolio Management:** Strict symbol-isolated chart rendering (preventing cross-asset price line leakage), background multi-asset tick polling for open positions across all held assets, dynamic per-asset pip scaling (Forex: 10,000, JPY: 100, Gold: 10, BTC: 1), "Positions on Other Assets" alert cards with 1-click chart switching, and decimal precision formatting (2 decimals for Gold/BTC, 3 for JPY, 5 for Forex).
   - **Auto-Playback Replay Engine:** Interactive **Play/Pause Auto-Forward Engine** with speed controls (1x, 2x, 5x, 10x) and interval step selection (+1m, +5m, +15m).
   - **Deterministic Replay Clock:** Zero-lookahead timestamp barrier restricting data visibility (`Timestamp <= CurrentReplayTimestamp`) with manual step-forward intervals (1m, 5m, 15m, 1H, 4H).
   - **Multi-Asset Expansion:** Native support for 6 asset classes across Major Forex (`EURUSD`, `GBPUSD`, `AUDUSD`), JPY Crosses (`USDJPY`), Commodities (`XAUUSD` Gold), and Crypto (`BTCUSD` Bitcoin) with asset-specific pip, point, and decimal formatting.
@@ -266,6 +267,20 @@ To eliminate the friction of manually computing and typing 5-decimal numbers int
    - **Move to Break-Even:** Instantly sets $\text{SL} = \text{EntryPrice}$ for risk-free protection.
    - Synchronized with PostgreSQL in Replay mode via `PUT /api/Trade/update/{tradeId}` and live tick evaluation in Live mode.
 
+### 2.8 Multi-Asset Architecture & Cross-Asset Isolation Engine
+
+To support concurrent trading across Forex, Metals, and Crypto without data contamination:
+1. **Strict Chart Symbol Isolation:**
+   Markers and horizontal lines (entry, SL, TP) are strictly filtered by symbol:
+   $$\text{Trades}_{\text{Visible}} = \{ t \in \text{Trades} \mid t.\text{Symbol} = S_{\text{Active}} \}$$
+   This completely prevents orders from one asset (e.g., $1.0850$ EURUSD) from rendering incompatible scale lines on another (e.g., $\$65,000$ BTCUSD).
+2. **Dynamic Pip & Point Scaling:**
+   $$\text{PipMultiplier} = \begin{cases} 10,000 & \text{Forex 5-decimal (EURUSD, GBPUSD, AUDUSD)} \\ 100 & \text{JPY Crosses (USDJPY, 1 pip = 0.01)} \\ 10 & \text{Commodities (XAUUSD Gold, 1 pt = \$0.10)} \\ 1 & \text{Crypto (BTCUSD, 1 pt = \$1.00)} \end{cases}$$
+3. **Background Multi-Asset Tick Polling:**
+   When in open positions across multiple assets, a background engine polls `/api/LivePrice/latest?symbol={s}` every 1.5s for all held symbols, ensuring the aggregated portfolio floating P&L remains 100% accurate regardless of which chart the trader is currently viewing.
+4. **Cross-Asset Alert Banner:**
+   An active "Positions on Other Assets" card alerts the trader to open exposure on other instruments, showing their live P&L and a 1-click **"View"** switch to jump immediately to that asset's chart.
+
 ---
 
 ## 3. Database Schema & Data Modeling
@@ -452,8 +467,73 @@ When presenting AegisTrader to your project evaluator, follow this step-by-step 
 - [x] **Auto-Forward Replay Engine:** Interactive Play/Pause, variable speeds ($1\times$–$10\times$), and step intervals.
 - [x] **Interactive Chart SL/TP & Quick Presets:** Canvas click-to-pick, 1-click R:R presets, in-flight Break-Even modification.
 - [x] **AI Machine Learning Forecaster:** Multivariate regularized Ridge Regression with statistical validation metrics.
+- [x] **Multi-Asset Isolation:** Strict cross-asset isolation, real-time background tick polling, and portfolio management.
 - [ ] **Phase 3:** Automated Strategy Scripting Engine (Custom PineScript / C# algorithm execution).
 - [ ] **Phase 4:** Computer Vision Pattern Recognition (Auto-detecting Fair Value Gaps & Order Blocks on chart canvas).
+
+---
+
+## 8. Academic Project Documentation & Evaluation Artifacts
+
+Comprehensive academic and engineering documentation is maintained in the repository for final semester evaluation and presentation:
+
+| Document / Asset | Location | Description |
+| :--- | :--- | :--- |
+| **Master Evaluation Guide** | [`Documents/AegisTrader_Final_Evaluation_Master_Guide.md`](./Documents/AegisTrader_Final_Evaluation_Master_Guide.md) | **1,000+ line master guide** containing the complete Viva Q&A (17 questions & answers), mathematical proofs, evaluation demo speech, and architecture walk-through. |
+| **Software Design Document** | [`Documents/AegisTrader Software Design Document (SDD) Final V3.txt`](./Documents/AegisTrader%20Software%20Design%20Document%20(SDD)%20Final%20V3.txt) | Complete technical specifications, data dictionaries, interface definitions, and system constraints. |
+| **Development & Learning Workflow** | [`Documents/AegisTrader - Comprehensive Development & Learning Workflow.txt`](./Documents/AegisTrader%20-%20Comprehensive%20Development%20%26%20Learning%20Workflow.txt) | Detailed chronological record of architectural decisions, bugs solved, and engineering trade-offs. |
+| **Project Abstract** | [`Documents/AegisTrader - Project Abstract.txt`](./Documents/AegisTrader%20-%20Project%20Abstract.txt) | Formal academic project abstract and problem formulation. |
+| **Dissertation Report** | [`ProjectReport.docx`](./ProjectReport.docx) | Formal academic dissertation report. |
+| **Architectural Diagrams** | [`Diagrams/`](./Diagrams/) | High-resolution architectural renders: **Class Diagram**, **Sequence Diagram**, **ER Diagram**, **Usecase Diagram**, **Activity Diagram**, **DFD Levels 0, 1 & 2**, **Gantt Chart**, and **PERT Chart**. |
+
+---
+
+## 9. Repository Archival, Safe Local Cleanup & Restoration Guide
+
+The AegisTrader project is officially completed and sealed. All source code, database migrations, machine learning models, documentation, diagrams, and git history are safely persisted on GitHub:
+- **Remote Repository URL:** [https://github.com/abibinu/AegisTrader.git](https://github.com/abibinu/AegisTrader.git)
+- **Primary Branch:** `main` (Fully synchronized and up to date)
+
+### 9.1 Option A: Reclaim Disk Space Without Deleting Repository (Recommended)
+If you wish to keep the project files on your machine while freeing up **1.5 GB to 2.5 GB** of disk space consumed by build artifacts, execute the following PowerShell command in the workspace root:
+
+```powershell
+# Remove heavy node_modules, .NET bin/obj, and build artifacts
+Get-ChildItem -Include node_modules, bin, obj, dist, .vs -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+```
+*All source code, git history, diagrams, and documentation remain 100% intact.*
+
+### 9.2 Option B: Full Deletion from Local Machine
+Since the repository is completely committed and pushed to GitHub remote, you can safely remove the local directory from your drive:
+
+```powershell
+# Navigate to parent folder and delete AegisTrader directory
+cd C:\Users\abiko\OneDrive\Desktop
+Remove-Item -Recurse -Force AegisTrader
+```
+
+### 9.3 Restoring / Re-Cloning on Any Device Anytime
+To restore and launch AegisTrader on any machine in the future:
+
+```bash
+# 1. Clone repository from GitHub
+git clone https://github.com/abibinu/AegisTrader.git
+cd AegisTrader
+
+# 2. Run Backend API (.NET 10)
+cd AegisTrader.API
+dotnet run --urls "http://localhost:5273"
+
+# 3. In a new terminal, run Frontend Client (React 19)
+cd ../AegisTrader.Frontend
+npm install
+npm run dev
+
+# 4. (Optional) Run Live Price Bridge (Python)
+cd ../bridge
+pip install -r requirements.txt
+python mt5_bridge.py
+```
 
 ---
 
