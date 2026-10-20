@@ -7,7 +7,7 @@
 
 ## Executive Summary & MVP Readiness Assessment
 
-**AegisTrader** is a full-stack, enterprise-grade trading simulation platform engineered for quantitative backtesting, live paper trading, and performance analytics. Specifically designed for **Inner Circle Trader (ICT)** and **Smart Money Concepts (SMC)** trading frameworks, the platform features a **deterministic historical replay engine** (with strict anti-lookahead timestamp protection) and a **real-time paper trading sandbox** powered by a **MetaTrader 5 (MT5) live price bridge**.
+**AegisTrader** is a full-stack, enterprise-grade trading simulation platform engineered for quantitative backtesting, live paper trading, and performance analytics. Specifically designed for **Institutional-Grade Multi-Asset Strategy Simulation**, the platform combines deterministic historical replay, live market paper execution, AI-assisted forecasting, risk analytics, and multi-asset portfolio isolation within a unified trading environment.
 
 ### College Project Evaluator Assessment: Complete Project Concluded
 
@@ -15,18 +15,18 @@
 - **Key Milestones Achieved:**
   - **Full Stack Infrastructure:** ASP.NET Core Web API + PostgreSQL (EF Core) + React 19 + Vite.
   - **Security & Authentication:** User registration/login with BCrypt password hashing and JWT Bearer token state management.
-  - **AI Machine Learning Time-Series Forecaster:** In-memory multivariate Ridge Regression engine extracting log returns, RSI(14), SMA(20) divergence, rolling volatility, and volume momentum to output directional bias, 95% confidence intervals, and out-of-sample error validation metrics (MAE, RMSE, $R^2$, Accuracy %).
+  - **AI Machine Learning Time-Series Forecaster:** In-memory multivariate Ridge Regression engine extracting log returns, RSI(14), SMA(20) divergence, rolling volatility, and volume momentum to output next-bar directional forecasts with confidence envelopes.
   - **Interactive Chart SL / TP & Canvas Coordinate Picking:** Direct click-to-pick chart pricing, visual pre-trade planned SL/TP preview lines, and active position target markers.
-  - **1-Click Presets & In-Flight Position Modification:** Quick 1:2 and 1:3 Risk-to-Reward preset calculation bar, pip nudges, and dedicated modal supporting single-click **Move to Break-Even** protection for open trades.
-  - **Multi-Asset Isolation & Portfolio Management:** Strict symbol-isolated chart rendering (preventing cross-asset price line leakage), background multi-asset tick polling for open positions across all held assets, dynamic per-asset pip scaling (Forex: 10,000, JPY: 100, Gold: 10, BTC: 1), "Positions on Other Assets" alert cards with 1-click chart switching, and decimal precision formatting (2 decimals for Gold/BTC, 3 for JPY, 5 for Forex).
+  - **1-Click Presets & In-Flight Position Modification:** Quick 1:2 and 1:3 Risk-to-Reward preset calculation bar, pip nudges, and dedicated modal supporting single-click **Move to Break-Even** position protection.
+  - **Multi-Asset Isolation & Portfolio Management:** Strict symbol-isolated chart rendering (preventing cross-asset price line leakage), background multi-asset tick polling for open positions across assets, and realistic synthetic portfolio P&L aggregation.
   - **Auto-Playback Replay Engine:** Interactive **Play/Pause Auto-Forward Engine** with speed controls (1x, 2x, 5x, 10x) and interval step selection (+1m, +5m, +15m).
   - **Deterministic Replay Clock:** Zero-lookahead timestamp barrier restricting data visibility (`Timestamp <= CurrentReplayTimestamp`) with manual step-forward intervals (1m, 5m, 15m, 1H, 4H).
-  - **Multi-Asset Expansion:** Native support for 6 asset classes across Major Forex (`EURUSD`, `GBPUSD`, `AUDUSD`), JPY Crosses (`USDJPY`), Commodities (`XAUUSD` Gold), and Crypto (`BTCUSD` Bitcoin) with asset-specific pip, point, and decimal formatting.
+  - **Multi-Asset Expansion:** Native support for 6 asset classes across Major Forex (`EURUSD`, `GBPUSD`, `AUDUSD`), JPY Crosses (`USDJPY`), Commodities (`XAUUSD` Gold), and Crypto (`BTCUSD` Bitcoin).
   - **Multi-Timeframe Aggregation Engine:** Server-side integer-division epoch grouping on 1-minute historical data without pre-calculated database tables.
   - **Live MT5 Price Feed Bridge:** Python bridge polling local MetaTrader 5 terminal (Vantage Markets demo) forwarding ticks at 500ms intervals with automatic simulation fallback.
-  - **Financial & Execution Math:** Forex pip calculations, dynamic unrealized floating P&L, lot sizing, and pessimistic **Overlap Constraint** resolution (defensive SL execution when a single candle hits both SL and TP).
-  - **Institutional Visual Canvas:** TradingView Lightweight Charts v5 integration featuring ICT/SMC Session Overlays (Asian Range, London KZ, NY KZ), SMA(20), volume subchart, dynamic HUD legend, interactive SL/TP horizontal target lines, and order markers.
-  - **Institutional Risk & Analytics Dashboard:** Real-time calculation of Sharpe Ratio, Sortino Ratio, Expectancy, Win Rate %, Profit Factor, Max Drawdown %, Net P&L, Session Heatmaps, and Day-of-Week performance.
+  - **Financial & Execution Math:** Forex pip calculations, dynamic unrealized floating P&L, lot sizing, and pessimistic **Overlap Constraint** resolution (defensive SL execution when a single candle violates both bounds).
+  - **Institutional Visual Canvas:** TradingView Lightweight Charts v5 integration featuring ICT/SMC Session Overlays (Asian Range, London KZ, NY KZ), SMA(20), volume subchart, dynamic HUD legend, and multi-session analytics overlays.
+  - **Institutional Risk & Analytics Dashboard:** Real-time calculation of Sharpe Ratio, Sortino Ratio, Expectancy, Win Rate %, Profit Factor, Max Drawdown %, Net P&L, Session Heatmaps, and Day-of-week performance analysis.
 
 ---
 
@@ -175,13 +175,20 @@ foreach (var group in grouped) {
 
 ### 2.3 Financial Mathematics & Pip P&L Model
 
-Forex price changes are measured in **Pips** ($1 \text{ Pip} = 0.00010$ on 5-decimal pairs like EURUSD).
+Forex price changes are measured in **pips**: $1 \text{ pip} = 0.00010$ on 5-decimal pairs like EURUSD.
 
-$$\text{Pips}_{\text{Buy}} = (\text{ExitPrice} - \text{EntryPrice}) \times 10,000$$
+$$
+\text{Pips}_{\text{Buy}} = (\text{ExitPrice} - \text{EntryPrice}) \times 10{,}000
+$$
 
-$$\text{Pips}_{\text{Sell}} = (\text{EntryPrice} - \text{ExitPrice}) \times 10,000$$
+$$
+\text{Pips}_{\text{Sell}} = (\text{EntryPrice} - \text{ExitPrice}) \times 10{,}000
+$$
 
-$$\text{Net PnL (\$) } = \text{Pips} \times \text{LotSize} \times \text{PipValue} \quad (\text{where PipValue} = \$10.00 \text{ per standard lot})$$
+$$
+\text{Net PnL (\$)} = \text{Pips} \times \text{LotSize} \times \text{PipValue}
+\quad (\text{where PipValue} = \$10.00 \text{ per standard lot})
+$$
 
 ```csharp
 // TradeService.cs: Forex Pip & P&L Calculation
@@ -196,7 +203,7 @@ public static decimal CalculatePnL(string direction, decimal entry, decimal exit
 
 ### 2.4 Defensive Overlap Constraint (Extreme Volatility Resolution)
 
-When market volatility causes a single candle's range ($\text{Low} \dots \text{High}$) to cross **both** Take Profit and Stop Loss boundaries simultaneously, standard simulators yield ambiguous results. AegisTrader implements a **Pessimistic Defensive Resolution**:
+When market volatility causes a single candle's range ($\text{Low} \dots \text{High}$) to cross **both** Take Profit and Stop Loss boundaries simultaneously, standard simulators yield ambiguous resolution logic. To prevent erroneous trade closure decisions, the system resolves all overlap conflicts pessimistically by prioritizing the Stop Loss when both triggers are hit in the same bar.
 
 ```csharp
 // TradeService.cs: Overlap Resolution
@@ -230,7 +237,7 @@ Metrics are computed over closed trades in `AnalyticsService.cs`:
 
 ### 2.6 AI Machine Learning Time-Series Forecaster (Ridge Regression Ensemble)
 
-AegisTrader features an in-memory supervised time-series forecasting model (`MlForecastingService.cs`) that predicts next-bar trajectory while adhering strictly to the zero-lookahead timestamp barrier:
+AegisTrader features an in-memory supervised time-series forecasting model (`MlForecastingService.cs`) that predicts next-bar trajectory while adhering strictly to the zero-lookahead timestamp barrier.
 
 1. **Feature Vector Formulation:**
    - **Log Return Momentum:** $\ln(P_t / P_{t-1})$
@@ -275,9 +282,16 @@ To support concurrent trading across Forex, Metals, and Crypto without data cont
    $$\text{Trades}_{\text{Visible}} = \{ t \in \text{Trades} \mid t.\text{Symbol} = S_{\text{Active}} \}$$
    This completely prevents orders from one asset (e.g., $1.0850$ EURUSD) from rendering incompatible scale lines on another (e.g., $\$65,000$ BTCUSD).
 2. **Dynamic Pip & Point Scaling:**
-   $$\text{PipMultiplier} = \begin{cases} 10,000 & \text{Forex 5-decimal (EURUSD, GBPUSD, AUDUSD)} \\ 100 & \text{JPY Crosses (USDJPY, 1 pip = 0.01)} \\ 10 & \text{Commodities (XAUUSD Gold, 1 pt = \$0.10)} \\ 1 & \text{Crypto (BTCUSD, 1 pt = \$1.00)} \end{cases}$$
+   $$
+   \text{PipMultiplier} =
+   \begin{cases}
+   10{,}000 & \text{Forex 5-decimal pairs (EURUSD, GBPUSD, AUDUSD)} \\
+   100 & \text{JPY crosses (USDJPY, 1 pip = 0.01)} \\
+   10 & \text{Commodities (XAUUSD Gold, 1 point = 1 pip)}
+   \end{cases}
+   $$
 3. **Background Multi-Asset Tick Polling:**
-   When in open positions across multiple assets, a background engine polls `/api/LivePrice/latest?symbol={s}` every 1.5s for all held symbols, ensuring the aggregated portfolio floating P&L remains 100% accurate regardless of which chart the trader is currently viewing.
+   When in open positions across multiple assets, a background engine polls `/api/LivePrice/latest?symbol={s}` every 1.5s for all held symbols, ensuring the aggregated portfolio floating P&L remains synchronized and independent per asset.
 4. **Cross-Asset Alert Banner:**
    An active "Positions on Other Assets" card alerts the trader to open exposure on other instruments, showing their live P&L and a 1-click **"View"** switch to jump immediately to that asset's chart.
 
@@ -453,7 +467,7 @@ When presenting AegisTrader to your project evaluator, follow this step-by-step 
 
 4. **AI Machine Learning Time-Series Forecaster (2 Mins):**
    - Click **AI ML Forecaster** on the chart header.
-   - Showcase the in-memory Ridge Regression engine: predicted next-bar price, directional probability %, 95% confidence intervals, and out-of-sample error validation (MAE, RMSE, $R^2$, Accuracy %).
+   - Showcase the in-memory Ridge Regression engine: predicted next-bar price, directional probability %, 95% confidence intervals, and out-of-sample error validation (MAE, RMSE, $R^2$, Accuracy, Directional Accuracy).
    - Explain how zero lookahead is mathematically maintained during forecasting.
 
 5. **Quantitative Analytics Dashboard (1.5 Mins):**
@@ -479,12 +493,12 @@ Comprehensive academic and engineering documentation is maintained in the reposi
 
 | Document / Asset | Location | Description |
 | :--- | :--- | :--- |
-| **Master Evaluation Guide** | [`Documents/AegisTrader_Final_Evaluation_Master_Guide.md`](./Documents/AegisTrader_Final_Evaluation_Master_Guide.md) | **1,000+ line master guide** containing the complete Viva Q&A (17 questions & answers), mathematical proofs, evaluation demo speech, and architecture walk-through. |
-| **Software Design Document** | [`Documents/AegisTrader Software Design Document (SDD) Final V3.txt`](./Documents/AegisTrader%20Software%20Design%20Document%20(SDD)%20Final%20V3.txt) | Complete technical specifications, data dictionaries, interface definitions, and system constraints. |
-| **Development & Learning Workflow** | [`Documents/AegisTrader - Comprehensive Development & Learning Workflow.txt`](./Documents/AegisTrader%20-%20Comprehensive%20Development%20%26%20Learning%20Workflow.txt) | Detailed chronological record of architectural decisions, bugs solved, and engineering trade-offs. |
+| **Master Evaluation Guide** | [`Documents/AegisTrader_Final_Evaluation_Master_Guide.md`](./Documents/AegisTrader_Final_Evaluation_Master_Guide.md) | **1,000+ line master guide** containing the complete project narrative, architecture, validation strategy, and evaluation checklist. |
+| **Software Design Document** | [`Documents/AegisTrader Software Design Document (SDD) Final V3.txt`](./Documents/AegisTrader%20Software%20Design%20Document%20(SDD)%20Final%20V3.txt) | Complete engineering specification and implementation blueprint. |
+| **Development & Learning Workflow** | [`Documents/AegisTrader - Comprehensive Development & Learning Workflow.txt`](./Documents/AegisTrader%20-%20Comprehensive%20Development%20%26%20Learning%20Workflow.txt) | Development process, learning roadmap, and engineering milestones. |
 | **Project Abstract** | [`Documents/AegisTrader - Project Abstract.txt`](./Documents/AegisTrader%20-%20Project%20Abstract.txt) | Formal academic project abstract and problem formulation. |
 | **Dissertation Report** | [`ProjectReport.docx`](./ProjectReport.docx) | Formal academic dissertation report. |
-| **Architectural Diagrams** | [`Diagrams/`](./Diagrams/) | High-resolution architectural renders: **Class Diagram**, **Sequence Diagram**, **ER Diagram**, **Usecase Diagram**, **Activity Diagram**, **DFD Levels 0, 1 & 2**, **Gantt Chart**, and **PERT Chart**. |
+| **Architectural Diagrams** | [`Diagrams/`](./Diagrams/) | High-resolution architectural renders: **Class Diagram**, **Sequence Diagram**, **ER Diagram**, **Usecase Diagram**, **Activity Diagram**, and **System Layer Visualization**. |
 
 ---
 
