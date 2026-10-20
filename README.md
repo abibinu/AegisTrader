@@ -175,20 +175,13 @@ foreach (var group in grouped) {
 
 ### 2.3 Financial Mathematics & Pip P&L Model
 
-Forex price changes are measured in **pips**: $1 \text{ pip} = 0.00010$ on 5-decimal pairs like EURUSD.
+Forex price changes are measured in **pips**: 1 pip = 0.00010 on 5-decimal pairs like EURUSD.
 
-$$
-\text{Pips}_{\text{Buy}} = (\text{ExitPrice} - \text{EntryPrice}) \times 10{,}000
-$$
+Pips_Buy = (ExitPrice - EntryPrice) × 10,000
 
-$$
-\text{Pips}_{\text{Sell}} = (\text{EntryPrice} - \text{ExitPrice}) \times 10{,}000
-$$
+Pips_Sell = (EntryPrice - ExitPrice) × 10,000
 
-$$
-\text{Net PnL (\$)} = \text{Pips} \times \text{LotSize} \times \text{PipValue}
-\quad (\text{where PipValue} = \$10.00 \text{ per standard lot})
-$$
+Net PnL ($) = Pips × LotSize × PipValue, where PipValue = $10.00 per standard lot
 
 ```csharp
 // TradeService.cs: Forex Pip & P&L Calculation
@@ -282,14 +275,10 @@ To support concurrent trading across Forex, Metals, and Crypto without data cont
    $$\text{Trades}_{\text{Visible}} = \{ t \in \text{Trades} \mid t.\text{Symbol} = S_{\text{Active}} \}$$
    This completely prevents orders from one asset (e.g., $1.0850$ EURUSD) from rendering incompatible scale lines on another (e.g., $\$65,000$ BTCUSD).
 2. **Dynamic Pip & Point Scaling:**
-   $$
-   \text{PipMultiplier} =
-   \begin{cases}
-   10{,}000 & \text{Forex 5-decimal pairs (EURUSD, GBPUSD, AUDUSD)} \\
-   100 & \text{JPY crosses (USDJPY, 1 pip = 0.01)} \\
-   10 & \text{Commodities (XAUUSD Gold, 1 point = 1 pip)}
-   \end{cases}
-   $$
+   PipMultiplier =
+   - 10,000 for Forex 5-decimal pairs (EURUSD, GBPUSD, AUDUSD)
+   - 100 for JPY crosses (USDJPY, 1 pip = 0.01)
+   - 10 for commodities (XAUUSD Gold, 1 point = 1 pip)
 3. **Background Multi-Asset Tick Polling:**
    When in open positions across multiple assets, a background engine polls `/api/LivePrice/latest?symbol={s}` every 1.5s for all held symbols, ensuring the aggregated portfolio floating P&L remains synchronized and independent per asset.
 4. **Cross-Asset Alert Banner:**
